@@ -1,10 +1,8 @@
-import argparse
 import itertools
 
 import cv2
-import numpy as np
-from skimage.measure import find_contours
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def split_image(image_path, crop_size, border_size):
