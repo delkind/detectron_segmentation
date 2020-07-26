@@ -37,7 +37,7 @@ def initialize_model(model_name, device, threshold):
 def predict(fs, crop, coords, predictor):
     outputs = predictor(crop)
     print(f'Processed {fs}:{str(coords)}')
-    return outputs
+    return outputs["instances"].to("cpu")
     predictions = outputs["instances"].to("cpu")
     boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
     scores = predictions.scores if predictions.has("scores") else None
