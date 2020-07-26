@@ -34,8 +34,10 @@ def initialize_model(model_name, device, threshold):
     return DefaultPredictor(cfg)
 
 
-def predict(crop, predictor):
+def predict(fs, crop, coords, predictor):
     outputs = predictor(crop)
+    print(f'Processed {fs}:{str(coords)}')
+    return outputs
     predictions = outputs["instances"].to("cpu")
     boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
     scores = predictions.scores if predictions.has("scores") else None
@@ -55,8 +57,8 @@ def main(model, full_dir, output, crop_size, border_size, device='cuda', thresho
     predictor = initialize_model(model, device, threshold)
     full_scans = [f for f in listdir(full_dir) if isfile(join(full_dir, f))]
     splitted = [(fs, split_image(os.path.join(full_dir, fs), crop_size, border_size)[0]) for fs in full_scans]
-    predictions = {fs: [(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), coords, predict(crop, predictor)) for crop, coords in
-                        split[:3]] for fs, split in splitted}
+    predictions = {fs: [(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), coords, predict(fs, crop, coords, predictor))
+                        for crop, coords in split[:3]] for fs, split in splitted}
     with open(output, 'wb') as f:
         pickle.dump(predictions, f)
     print(f'Predictions saved to {output}. Exiting...')
