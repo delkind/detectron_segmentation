@@ -160,7 +160,7 @@ def main(predictions, output_dir, select_roi):
                     build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}', concat_eq, suffix)
             else:
                 resized = cv2.resize(full_image, (0, 0), fx=0.0125, fy=0.0125)
-                r = cv2.selectROI("Select region to edit", resized)
+                # r = cv2.selectROI("Select region to edit", resized)
                 # r = cv2.selectROI("Select region to edit", crops[0][0])
                 # crops = [crop for crop in crops if ]
 
