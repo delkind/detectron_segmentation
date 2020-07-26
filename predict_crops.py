@@ -1,17 +1,34 @@
 import argparse
+import itertools
 import os
 import pickle
 from os import listdir
 from os.path import isfile, join
 
 import cv2
-import numpy as np
 from detectron2 import model_zoo
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
-from detectron2.utils.visualizer import GenericMask
 
-from process_full_scan import split_image
+
+def split_image(image_path, crop_size, border_size):
+    image = cv2.imread(image_path)
+    return create_crops_list(border_size, crop_size, image), image
+
+
+def create_crops_list(border_size, crop_size, image):
+    crop_coords = create_crops_coords_list(crop_size, border_size, image)
+    crops = [image[i:i + crop_size, j:j + crop_size, ...] for (i, j) in crop_coords]
+    return list(zip(crops, crop_coords))
+
+
+def create_crops_coords_list(crop_size, border_size, image):
+    vert = list(range(0, image.shape[0], crop_size - 2 * border_size))
+    horiz = list(range(0, image.shape[1], crop_size - 2 * border_size))
+    vert = list(filter(lambda v: v + crop_size <= image.shape[0], vert)) + [image.shape[0] - crop_size]
+    horiz = list(filter(lambda v: v + crop_size <= image.shape[1], horiz)) + [image.shape[1] - crop_size]
+    crop_coords = list(itertools.product(vert, horiz))
+    return crop_coords
 
 
 def initialize_model(model_name, device, threshold):
@@ -38,19 +55,6 @@ def predict(fs, crop, coords, predictor):
     outputs = predictor(crop)
     print(f'Processed {fs}:{str(coords)}')
     return outputs["instances"].to("cpu")
-    predictions = outputs["instances"].to("cpu")
-    boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
-    scores = predictions.scores if predictions.has("scores") else None
-    classes = predictions.pred_classes if predictions.has("pred_classes") else None
-    keypoints = predictions.pred_keypoints if predictions.has("pred_keypoints") else None
-
-    if not predictions.has('pred_masks'):
-        return None
-
-    masks = np.asarray(predictions.pred_masks)
-    masks = [GenericMask(x, 312, 312) for x in masks]
-    polygons = [poly.reshape(-1, 2) for mask in masks for poly in mask.polygons]
-    return polygons
 
 
 def main(model, full_dir, output, crop_size, border_size, device='cuda', threshold=0.5):

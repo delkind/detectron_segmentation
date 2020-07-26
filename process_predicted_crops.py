@@ -6,7 +6,6 @@ import pickle
 import cv2
 import numpy as np
 from detectron2.utils.visualizer import GenericMask
-from shapely.geometry import Polygon
 
 source = """
 {
@@ -131,6 +130,7 @@ def create_annotated_scan(crops, output_dir, suffix):
 
     cv2.polylines(original, polygons, isClosed=True, color=(0, 255, 0))
     cv2.imwrite(os.path.join(output_dir, f'{suffix}.jpg'), original)
+    return original
 
 
 def coords_to_str(crop):
@@ -146,17 +146,23 @@ def group_by_rows(crops):
     return crops
 
 
-def main(predictions, output_dir):
+def main(predictions, output_dir, select_roi):
     with open(predictions, 'rb') as f:
         predictions = pickle.load(f)
         os.makedirs(output_dir, exist_ok=True)
         for full_scan, crops in predictions.items():
             suffix = file_without_ext(full_scan)
-            create_annotated_scan(crops, output_dir, suffix)
-            crops = group_by_rows(crops)
-            for crop in crops:
-                build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix)
-                build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}', concat_eq, suffix)
+            full_image = create_annotated_scan(crops, output_dir, suffix)
+            if not select_roi:
+                crops = group_by_rows(crops)
+                for crop in crops:
+                    build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix)
+                    build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}', concat_eq, suffix)
+            else:
+                resized = cv2.resize(full_image, (0, 0), fx=0.0125, fy=0.0125)
+                r = cv2.selectROI("Select region to edit", resized)
+                # r = cv2.selectROI("Select region to edit", crops[0][0])
+                # crops = [crop for crop in crops if ]
 
 
 if __name__ == '__main__':
@@ -164,6 +170,7 @@ if __name__ == '__main__':
         description='Detectron Mask R-CNN for cells segmentation - parse predictions')
     parser.add_argument('--output_dir', required=True, action='store', help='Directory to output the predicted results')
     parser.add_argument('--predictions', required=True, action='store', help='Predictions pickle')
+    parser.add_argument('--select_roi', action='store_true', help='Manually select ROIs')
     args = parser.parse_args()
 
-    main(args.predictions, args.output_dir)
+    main(args.predictions, args.output_dir, args.select_roi)
