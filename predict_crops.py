@@ -12,7 +12,9 @@ from detectron2.engine import DefaultPredictor
 
 
 def split_image(image_path, crop_size, border_size):
-    image = cv2.imread(image_path)
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    image = cv2.equalizeHist(image)
+    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     return create_crops_list(border_size, crop_size, image), image
 
 
@@ -68,7 +70,7 @@ def main(model, full_dir, output, crop_size, border_size, device='cuda', thresho
     print(f'Predictions saved to {output}. Exiting...')
 
 
-if __name__ == '__main__':
+def process_predict_arguments():
     parser = argparse.ArgumentParser(
         description='Detectron Mask R-CNN for cells segmentation - predictions')
     parser.add_argument('--model', required=True, action='store', help='Model name')
@@ -79,6 +81,9 @@ if __name__ == '__main__':
                         help='Size of the border (to make crops overlap)')
     parser.add_argument('--device', default='cuda', action='store', help='Model execution device')
     parser.add_argument('--threshold', default=0.5, action='store', help='Prediction threshold')
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+if __name__ == '__main__':
+    args = process_predict_arguments()
     main(args.model, args.full_dir, args.output, args.crop_size, args.border_size, args.device, args.threshold)
