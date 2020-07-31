@@ -47,7 +47,7 @@ class MyDatasetMapper:
 
         self.tfm_gens = self.tfm_gens + [T.RandomBrightness(0.5, 2),
                                          T.RandomContrast(0.5, 2),
-                                         T.RandomSaturation(0.5, 2)]
+                                         ]
 
         # fmt: off
         self.img_format = cfg.INPUT.FORMAT
