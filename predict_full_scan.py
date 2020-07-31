@@ -6,7 +6,7 @@ from os.path import isfile, join
 
 import cv2
 
-from predict_crops import initialize_model, split_image
+from predict_crops import initialize_model, split_image, process_predict_arguments
 from process_predicted_crops import to_polygons, file_without_ext
 
 
@@ -33,16 +33,6 @@ def main(model, full_dir, output, crop_size, border_size, device='cuda', thresho
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Detectron Mask R-CNN for cells segmentation - predictions (full image)')
-    parser.add_argument('--model', required=True, action='store', help='Model name')
-    parser.add_argument('--full_dir', required=True, action='store', help='Directory that contains full scans')
-    parser.add_argument('--output', required=True, action='store', help='Filename for predictions pickle')
-    parser.add_argument('--crop_size', default=312, type=int, action='store', help='Size of a single crop')
-    parser.add_argument('--border_size', default=20, type=int, action='store',
-                        help='Size of the border (to make crops overlap)')
-    parser.add_argument('--device', default='cuda', action='store', help='Model execution device')
-    parser.add_argument('--threshold', default=0.5, action='store', help='Prediction threshold')
-    args = parser.parse_args()
+    args = process_predict_arguments()
 
     main(args.model, args.full_dir, args.output, args.crop_size, args.border_size, args.device, args.threshold)

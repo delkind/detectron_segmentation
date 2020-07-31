@@ -1,11 +1,16 @@
 import argparse
 import json
+import math
 import os
 import pickle
 
 import cv2
 import numpy as np
+import scipy
 from detectron2.utils.visualizer import GenericMask
+from scipy.spatial.qhull import ConvexHull
+
+from rect import Rect
 
 source = """
 {
@@ -49,9 +54,9 @@ source = """
 """
 
 
-def create_file_entry(file_path, annotations):
+def create_file_entry(file_path, polygons):
     regions = []
-    for annotation in annotations:
+    for annotation in polygons:
         all_points_x = []
         all_points_y = []
         for (x, y) in annotation.tolist():
@@ -122,15 +127,18 @@ def create_annotated_scan(crops, output_dir, suffix):
     size_y = max(coord_lists[0]) + 312
     size_x = max(coord_lists[1]) + 312
     original = np.zeros((size_y, size_x, 3), dtype=np.int16)
-    polygons = []
+    mask = np.zeros((size_y, size_x), dtype=bool)
     for crop, coords, pred in crops:
         crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
-        polygons += [poly + list(reversed(coords)) for poly in to_polygons(pred)]
         original[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312, :] = crop
+        masks = np.asarray(pred.pred_masks).sum(axis=0).astype(bool)
+        mask[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312] = masks
 
-    cv2.polylines(original, polygons, isClosed=True, color=(0, 255, 0))
+    mask = GenericMask(mask, mask.shape[0], mask.shape[1])
+    polygons = [poly.reshape(-1, 2) for poly in mask.polygons]
+    cv2.polylines(original, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
     cv2.imwrite(os.path.join(output_dir, f'{suffix}.jpg'), original)
-    return original
+    return cv2.imread(os.path.join(output_dir, f'{suffix}.jpg'))
 
 
 def coords_to_str(crop):
@@ -146,6 +154,20 @@ def group_by_rows(crops):
     return crops
 
 
+def create_rois_list(crops, full_image, project_size=10):
+    resized = cv2.resize(full_image, (0, 0), fx=0.25, fy=0.25)
+    rois = cv2.selectROIs("Select region to edit", resized)
+    if type(rois) is not tuple:
+        rois = [Rect(*roi) for roi in (rois * 4).tolist()]
+        crops = [[crop for crop in crops if Rect(crop[1][1], crop[1][0], crop[0].shape[1], crop[0].shape[0]).
+            intersection(r).area() > 0] for r in rois]
+        # crops = [crops[i * project_size:i * project_size + project_size]
+        #          for i in range(math.ceil(len(crops) / project_size))]
+        return crops
+    else:
+        return []
+
+
 def main(predictions, output_dir, select_roi):
     with open(predictions, 'rb') as f:
         predictions = pickle.load(f)
@@ -153,16 +175,16 @@ def main(predictions, output_dir, select_roi):
         for full_scan, crops in predictions.items():
             suffix = file_without_ext(full_scan)
             full_image = create_annotated_scan(crops, output_dir, suffix)
-            if not select_roi:
+            if select_roi:
+                crops = create_rois_list(crops, full_image)
+                for num, crop in enumerate(crops):
+                    build_project(crop, f'{output_dir}/{suffix}/simple/{num}', lambda c: c, suffix)
+                    build_project(crop, f'{output_dir}/{suffix}/augmented/{num}', concat_eq, suffix)
+            else:
                 crops = group_by_rows(crops)
                 for crop in crops:
                     build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix)
                     build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}', concat_eq, suffix)
-            else:
-                resized = cv2.resize(full_image, (0, 0), fx=0.0125, fy=0.0125)
-                # r = cv2.selectROI("Select region to edit", resized)
-                # r = cv2.selectROI("Select region to edit", crops[0][0])
-                # crops = [crop for crop in crops if ]
 
 
 if __name__ == '__main__':
