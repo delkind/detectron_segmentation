@@ -1,14 +1,11 @@
 import argparse
 import json
-import math
 import os
 import pickle
 
 import cv2
 import numpy as np
-import scipy
 from detectron2.utils.visualizer import GenericMask
-from scipy.spatial.qhull import ConvexHull
 
 from normalize_scans import get_eq_func
 from predict_crops import create_crops_coords_list
@@ -127,38 +124,13 @@ def to_polygons(predictions):
     return polygons
 
 
-def create_clear_scan(crops):
-    coord_lists = list(zip(*[coords for _, coords, _ in crops]))
-    size_y = max(coord_lists[0]) + 312
-    size_x = max(coord_lists[1]) + 312
-    original = np.zeros((size_y, size_x), dtype=np.int16)
-    for crop, coords, pred in crops:
-        original[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312] = crop
-
-    return original
-
-
-def create_annotated_scan(crops, output_dir, suffix):
-    original, mask = create_image_and_annotations(crops)
-    mask = GenericMask(mask, mask.shape[0], mask.shape[1])
+def create_annotated_scan(original, mask, output_dir, suffix):
+    original = original.copy()
+    mask = GenericMask(mask, *mask.shape)
     polygons = [poly.reshape(-1, 2) for poly in mask.polygons]
     cv2.polylines(original, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
     cv2.imwrite(os.path.join(output_dir, f'{suffix}.jpg'), original)
     return cv2.imread(os.path.join(output_dir, f'{suffix}.jpg'))
-
-
-def create_image_and_annotations(crops):
-    coord_lists = list(zip(*[coords for _, coords, _ in crops]))
-    size_y = max(coord_lists[0]) + 312
-    size_x = max(coord_lists[1]) + 312
-    original = np.zeros((size_y, size_x, 3), dtype=np.int16)
-    mask = np.zeros((size_y, size_x), dtype=bool)
-    for crop, coords, pred in crops:
-        crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
-        original[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312, :] = crop
-        masks = np.asarray(pred.pred_masks).sum(axis=0).astype(bool)
-        mask[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312] = masks
-    return original, mask
 
 
 def coords_to_str(crop):
@@ -175,7 +147,8 @@ def group_by_rows(crops):
 
 
 def create_rois_list(crops, full_image, project_size=10):
-    resized = cv2.resize(full_image, (0, 0), fx=0.25, fy=0.25)
+    resized = full_image
+    # resized = cv2.resize(full_image, (0, 0), fx=0.25, fy=0.25)
     rois = cv2.selectROIs("Select region to edit", resized)
     if type(rois) is not tuple:
         rois = [Rect(*roi) for roi in (rois * 4).tolist()]
@@ -188,25 +161,25 @@ def create_rois_list(crops, full_image, project_size=10):
         return []
 
 
-def create_non_overlapping_crops(crops, border_size=0):
-    image, mask = create_image_and_annotations(crops)
-    crop_size = crops[0][0].shape[0]
-    crop_coords = create_crops_coords_list(crop_size, border_size, image)
+def create_non_overlapping_crops(image, mask, crop_size):
+    crop_coords = create_crops_coords_list(crop_size, 0, image)
     crops = [image[i:i + crop_size, j:j + crop_size, ...] for (i, j) in crop_coords]
     masks = [mask[i:i + crop_size, j:j + crop_size, ...] for (i, j) in crop_coords]
     return list(zip(crops, crop_coords, masks))
 
 
-def main(predictions, output_dir, select_roi, false_positive):
+def main(predictions, output_dir, input_dir, select_roi, false_positive, crop_size):
     with open(predictions, 'rb') as f:
         predictions = pickle.load(f)
         os.makedirs(output_dir, exist_ok=True)
-        for full_scan, crops in predictions.items():
+        for full_scan, mask in predictions.items():
             suffix = file_without_ext(full_scan)
-            full_image = create_annotated_scan(crops, output_dir, suffix)
-            eq_func = get_eq_func([create_clear_scan(crops)])
+            original_file_name = os.path.join(input_dir, full_scan)
+            original = cv2.imread(original_file_name)
+            full_image = create_annotated_scan(original, mask, output_dir, suffix)
+            eq_func = get_eq_func([original])
 
-            crops = create_non_overlapping_crops(crops)
+            crops = create_non_overlapping_crops(original, mask, crop_size)
 
             if select_roi:
                 crops = create_rois_list(crops, full_image)
@@ -217,16 +190,19 @@ def main(predictions, output_dir, select_roi, false_positive):
             else:
                 crops = group_by_rows(crops)
                 for crop in crops:
-                    build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix)
+                    build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix,
+                                  False)
                     build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}',
-                                  lambda c: concat_eq(c, eq_func), suffix)
+                                  lambda c: concat_eq(c, eq_func), suffix, False)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Detectron Mask R-CNN for cells segmentation - parse predictions')
+    parser.add_argument('--input_dir', required=True, action='store', help='Directory containing full scan files')
     parser.add_argument('--output_dir', required=True, action='store', help='Directory to output the predicted results')
     parser.add_argument('--predictions', required=True, action='store', help='Predictions pickle')
+    parser.add_argument('--crop_size', default=312, type=int, action='store', help='Size of a single crop')
     parser.add_argument('--select_roi', action='store_true', help='Manually select ROIs')
     parser.add_argument('--false_positive', action='store_true', help='Manually select ROIs')
     args = parser.parse_args()
