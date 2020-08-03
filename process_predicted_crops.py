@@ -10,6 +10,8 @@ import scipy
 from detectron2.utils.visualizer import GenericMask
 from scipy.spatial.qhull import ConvexHull
 
+from normalize_scans import get_eq_func
+from predict_crops import create_crops_coords_list
 from rect import Rect
 
 source = """
@@ -82,7 +84,7 @@ def create_file_entry(file_path, polygons):
     return current
 
 
-def build_project(crops, output_dir, process, suffix):
+def build_project(crops, output_dir, process, suffix, false_positive):
     os.makedirs(output_dir, exist_ok=True)
     project = json.loads(source)
     metadata = dict()
@@ -91,7 +93,7 @@ def build_project(crops, output_dir, process, suffix):
         file_name = f'{coords[1]}_{coords[0]}_{suffix}.jpg'
         image_path = os.path.join(output_dir, file_name)
         cv2.imwrite(image_path, processed)
-        entry = create_file_entry(image_path, to_polygons(prediction))
+        entry = create_file_entry(image_path, to_polygons(prediction) if not false_positive else [])
         entry['size'] = os.path.getsize(image_path)
         metadata[entry['filename'] + str(entry['size'])] = entry
     project['_via_img_metadata'] = metadata
@@ -103,26 +105,49 @@ def file_without_ext(path):
     return os.path.splitext(os.path.split(path)[-1])[0]
 
 
-def concat_eq(crop):
-    return np.concatenate([cv2.equalizeHist(crop), crop], axis=1)
+def concat_eq(crop, eq_func):
+    return np.concatenate([eq_func[crop], crop], axis=1)
 
 
 def to_polygons(predictions):
-    boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
-    scores = predictions.scores if predictions.has("scores") else None
-    classes = predictions.pred_classes if predictions.has("pred_classes") else None
-    keypoints = predictions.pred_keypoints if predictions.has("pred_keypoints") else None
+    if type(predictions) == np.ndarray:
+        masks = [GenericMask(predictions, predictions.shape[0], predictions.shape[1])]
+    else:
+        boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
+        scores = predictions.scores if predictions.has("scores") else None
+        classes = predictions.pred_classes if predictions.has("pred_classes") else None
+        keypoints = predictions.pred_keypoints if predictions.has("pred_keypoints") else None
+        if not predictions.has('pred_masks'):
+            return None
 
-    if not predictions.has('pred_masks'):
-        return None
+        masks = np.asarray(predictions.pred_masks)
+        masks = [GenericMask(x, 312, 312) for x in masks]
 
-    masks = np.asarray(predictions.pred_masks)
-    masks = [GenericMask(x, 312, 312) for x in masks]
     polygons = [poly.reshape(-1, 2) for mask in masks for poly in mask.polygons]
     return polygons
 
 
+def create_clear_scan(crops):
+    coord_lists = list(zip(*[coords for _, coords, _ in crops]))
+    size_y = max(coord_lists[0]) + 312
+    size_x = max(coord_lists[1]) + 312
+    original = np.zeros((size_y, size_x), dtype=np.int16)
+    for crop, coords, pred in crops:
+        original[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312] = crop
+
+    return original
+
+
 def create_annotated_scan(crops, output_dir, suffix):
+    original, mask = create_image_and_annotations(crops)
+    mask = GenericMask(mask, mask.shape[0], mask.shape[1])
+    polygons = [poly.reshape(-1, 2) for poly in mask.polygons]
+    cv2.polylines(original, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
+    cv2.imwrite(os.path.join(output_dir, f'{suffix}.jpg'), original)
+    return cv2.imread(os.path.join(output_dir, f'{suffix}.jpg'))
+
+
+def create_image_and_annotations(crops):
     coord_lists = list(zip(*[coords for _, coords, _ in crops]))
     size_y = max(coord_lists[0]) + 312
     size_x = max(coord_lists[1]) + 312
@@ -133,12 +158,7 @@ def create_annotated_scan(crops, output_dir, suffix):
         original[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312, :] = crop
         masks = np.asarray(pred.pred_masks).sum(axis=0).astype(bool)
         mask[coords[0]:coords[0] + 312, coords[1]: coords[1] + 312] = masks
-
-    mask = GenericMask(mask, mask.shape[0], mask.shape[1])
-    polygons = [poly.reshape(-1, 2) for poly in mask.polygons]
-    cv2.polylines(original, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
-    cv2.imwrite(os.path.join(output_dir, f'{suffix}.jpg'), original)
-    return cv2.imread(os.path.join(output_dir, f'{suffix}.jpg'))
+    return original, mask
 
 
 def coords_to_str(crop):
@@ -168,23 +188,38 @@ def create_rois_list(crops, full_image, project_size=10):
         return []
 
 
-def main(predictions, output_dir, select_roi):
+def create_non_overlapping_crops(crops, border_size=0):
+    image, mask = create_image_and_annotations(crops)
+    crop_size = crops[0][0].shape[0]
+    crop_coords = create_crops_coords_list(crop_size, border_size, image)
+    crops = [image[i:i + crop_size, j:j + crop_size, ...] for (i, j) in crop_coords]
+    masks = [mask[i:i + crop_size, j:j + crop_size, ...] for (i, j) in crop_coords]
+    return list(zip(crops, crop_coords, masks))
+
+
+def main(predictions, output_dir, select_roi, false_positive):
     with open(predictions, 'rb') as f:
         predictions = pickle.load(f)
         os.makedirs(output_dir, exist_ok=True)
         for full_scan, crops in predictions.items():
             suffix = file_without_ext(full_scan)
             full_image = create_annotated_scan(crops, output_dir, suffix)
+            eq_func = get_eq_func([create_clear_scan(crops)])
+
+            crops = create_non_overlapping_crops(crops)
+
             if select_roi:
                 crops = create_rois_list(crops, full_image)
                 for num, crop in enumerate(crops):
-                    build_project(crop, f'{output_dir}/{suffix}/simple/{num}', lambda c: c, suffix)
-                    build_project(crop, f'{output_dir}/{suffix}/augmented/{num}', concat_eq, suffix)
+                    build_project(crop, f'{output_dir}/{suffix}/simple/{num}', lambda c: c, suffix, false_positive)
+                    build_project(crop, f'{output_dir}/{suffix}/augmented/{num}', lambda c: concat_eq(c, eq_func),
+                                  suffix, false_positive)
             else:
                 crops = group_by_rows(crops)
                 for crop in crops:
                     build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix)
-                    build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}', concat_eq, suffix)
+                    build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}',
+                                  lambda c: concat_eq(c, eq_func), suffix)
 
 
 if __name__ == '__main__':
@@ -193,6 +228,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', required=True, action='store', help='Directory to output the predicted results')
     parser.add_argument('--predictions', required=True, action='store', help='Predictions pickle')
     parser.add_argument('--select_roi', action='store_true', help='Manually select ROIs')
+    parser.add_argument('--false_positive', action='store_true', help='Manually select ROIs')
     args = parser.parse_args()
 
-    main(args.predictions, args.output_dir, args.select_roi)
+    main(**vars(args))
