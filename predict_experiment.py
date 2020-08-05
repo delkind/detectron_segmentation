@@ -251,6 +251,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_btm', default=13.6, action='store', help='Maximum box-to-mask ratio to analyze')
     parser.add_argument('--bbox_padding', default=0, action='store', help='Padding (in pixels) for the hippocampus bounding box')
     parser.add_argument('--cache', default=False, action='store_true', help='Cache the downloaded crops')
+    parser.add_argument('--save_mask', default=True, action='store_true', help='Cache the downloaded crops')
 
     parser.add_argument('--crop_size', default=312, type=int, action='store', help='Size of a single crop')
     parser.add_argument('--border_size', default=20, type=int, action='store',
@@ -259,4 +260,5 @@ if __name__ == '__main__':
     parser.add_argument('--threshold', default=0.5, action='store', help='Prediction threshold')
     args = parser.parse_args()
 
+    print(vars(args))
     predict_experiment(**vars(args))
