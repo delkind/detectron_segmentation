@@ -13,17 +13,20 @@ from detectron2.utils.visualizer import GenericMask
 from tqdm import tqdm
 
 
-def download_url(url, decription=None):
+def download_url(url, decription=None, filename=None):
     class DownloadProgressBar(tqdm):
         def update_to(self, b=1, bsize=1, tsize=None):
             if tsize is not None:
                 self.total = tsize
             self.update(b * bsize - self.n)
 
+    if filename is not None and os.path.isfile(filename):
+        return filename
+
     with DownloadProgressBar(unit='B', unit_scale=True,
                              miniters=1, desc=decription) as t:
-        file_name, _ = urllib.request.urlretrieve(url, reporthook=t.update_to)
-        return file_name
+        filename, _ = urllib.request.urlretrieve(url, filename=filename, reporthook=t.update_to)
+        return filename
 
 
 def extract_predictions(predictions):
@@ -64,18 +67,21 @@ def download_thumbnail(image_desc):
 
 
 def download_full_scan(image_desc, box):
+    dataset_id = image_desc["data_set_id"]
+    section_number = image_desc["section_number"]
     return download_section_image(image_desc["path"], 8,
-                                  f'Downloading full scan for experiment {image_desc["data_set_id"]} '
-                                  f'section {image_desc["section_number"]}', box)
+                                  f'Downloading full scan for experiment {dataset_id} '
+                                  f'section {section_number}', box,
+                                  filename=f'{dataset_id}-{section_number}.jpg')
 
 
-def download_section_image(image_path, zoom, description, box=None):
+def download_section_image(image_path, zoom, description, box=None, filename=None):
     url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_path}&' \
           f'mime=1&zoom={zoom}&&filter=range&filterVals=0,534,0,1006,0,4095'
     if box is not None:
         x1, y1, x2, y2 = box
         url += f'&top={y1}&left={x1}&width={x2 - x1}&height={y2 - y1}'
-    temp_file = download_url(url, decription=description)
+    temp_file = download_url(url, decription=description, filename=filename)
     image = cv2.imread(temp_file, cv2.IMREAD_COLOR)
     os.remove(temp_file)
     return image
@@ -180,7 +186,9 @@ def predict_experiment(experiment_id, relevant_sections, hippo_predictor, cell_p
             crops = create_crops_list(border_size, crop_size, image)
             for num, (crop, coords) in enumerate(crops):
                 print(f'Predicting crop {num} out of {len(crops)}...')
-                outputs = cell_predictor(cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR))
+                outputs = cell_predictor(cv2.cvtColor(cv2.cvtColor(image[coords[0]: coords[0] + crop_size,
+                                                                   coords[1]: coords[1] + crop_size],
+                                                                   cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR))
                 _, mask = extract_predictions(outputs["instances"].to("cpu"))
                 cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] |= mask
 
@@ -200,5 +208,5 @@ def initialize_model(model_path, device, threshold):
 
 if __name__ == '__main__':
     hippo_predictor = initialize_model('output/model_final.pth', 'cpu', 0.5)
-    cell_predictor = initialize_model('output/model_0449999.pth', 'cpu', 0.5)
-    predict_experiment(129564675, range(63, 83), hippo_predictor, None, (5.5, 13.6), 312, 20)
+    cell_predictor = initialize_model('output/model_cells.pth', 'cpu', 0.5)
+    predict_experiment(129564675, range(67, 83), hippo_predictor, cell_predictor, (5.5, 13.6), 312, 20)
