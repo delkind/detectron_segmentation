@@ -213,6 +213,8 @@ def get_balloon_dicts(img_dir, json_file):
 
 def main(image_dir, project, crop_size, batch_size, iterations, validation_split, backbone,
          output_dir, learning_rate, device):
+    launch_tb(output_dir)
+
     DatasetCatalog.register("train", lambda: get_balloon_dicts(image_dir, project))
     MetadataCatalog.get("train").set(thing_classes=["balloon"])
     DatasetCatalog.register("val", lambda: get_balloon_dicts(image_dir, project))
@@ -239,6 +241,13 @@ def main(image_dir, project, crop_size, batch_size, iterations, validation_split
     trainer = Trainer(cfg)
     trainer.resume_or_load(resume=False)
     trainer.train()
+
+
+def launch_tb(output_dir):
+    from tensorboard import program
+    tb = program.TensorBoard()
+    tb.configure(argv=[None, '--logdir', output_dir])
+    return tb.launch()
 
 
 if __name__ == '__main__':

@@ -2,6 +2,9 @@ from collections import namedtuple
 
 
 class Rect(namedtuple("RectBase", ['x', 'y', 'w', 'h'])):
+    def point_in(self, x, y):
+        return self.x <= x <= self.x + self.w and self.y <= y <= self.y + self.h
+
     def intersection(self, rect):
         x = max(self.x, rect.x)
         y = max(self.y, rect.y)
