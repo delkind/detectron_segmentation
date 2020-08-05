@@ -246,7 +246,7 @@ def main(image_dir, project, crop_size, batch_size, iterations, validation_split
 def launch_tb(output_dir):
     from tensorboard import program
     tb = program.TensorBoard()
-    tb.configure(argv=[None, '--logdir', output_dir])
+    tb.configure(argv=[None, '--bind_all', '--logdir', output_dir])
     return tb.launch()
 
 
