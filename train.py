@@ -213,7 +213,7 @@ def get_balloon_dicts(img_dir, json_file):
 
 def main(image_dir, project, crop_size, batch_size, iterations, validation_split, backbone,
          output_dir, learning_rate, device):
-    launch_tb(output_dir)
+    print(f'Tensorboard URL: {launch_tb(output_dir)}')
 
     DatasetCatalog.register("train", lambda: get_balloon_dicts(image_dir, project))
     MetadataCatalog.get("train").set(thing_classes=["balloon"])
