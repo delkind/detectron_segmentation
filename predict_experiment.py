@@ -195,7 +195,7 @@ def predict_experiment(experiment_id, relevant_sections, hippo_predictor, cell_p
                     np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
 
             mask = np.logical_and(hippo_mask, cell_mask)
-            create_annotated_scan(image, mask, f'{experiment_id}-{section}')
+            create_annotated_scan(image, mask, f'{experiment_id}-{section}.jpg')
 
 
 def initialize_model(model_path, device, threshold):
