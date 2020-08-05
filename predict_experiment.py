@@ -1,3 +1,4 @@
+import argparse
 import itertools
 import os
 import urllib.request
@@ -60,19 +61,30 @@ def predict_hippo(image, predictor):
     return polygons, bbox, mask
 
 
-def download_thumbnail(image_desc):
-    return download_section_image(image_desc["path"], 2,
-                                  f'Downloading thumbnail for experiment {image_desc["data_set_id"]} '
-                                  f'section {image_desc["section_number"]}')
-
-
-def download_full_scan(image_desc, box):
+def create_file_name(cache_dir, image_desc, suffix):
     dataset_id = image_desc["data_set_id"]
     section_number = image_desc["section_number"]
+    if cache_dir:
+        filename = f'{cache_dir}/{section_number}-{suffix}.jpg'
+    else:
+        filename = None
+    return dataset_id, filename, section_number
+
+
+def download_thumbnail(image_desc, cache_dir):
+    dataset_id, filename, section_number = create_file_name(cache_dir, image_desc, 'thumbnail')
+    return download_section_image(image_desc["path"], 2,
+                                  f'Downloading thumbnail for experiment {dataset_id} '
+                                  f'section {section_number}', filename=filename)
+
+
+def download_full_scan(image_desc, box, cache_dir):
+    dataset_id, filename, section_number = create_file_name(cache_dir, image_desc, 'full')
+    dataset_id = image_desc["data_set_id"]
     return download_section_image(image_desc["path"], 8,
                                   f'Downloading full scan for experiment {dataset_id} '
                                   f'section {section_number}', box,
-                                  filename=f'{dataset_id}-{section_number}.jpg')
+                                  filename=filename)
 
 
 def download_section_image(image_path, zoom, description, box=None, filename=None):
@@ -120,9 +132,10 @@ def annotate_image(experiment, section, image, bbox, polygons, cbox, cmask, btm)
     return image
 
 
-def process_thumbnail(annotated_thumbnail_callback, btm_range, experiment_id, hippo_predictor, images, section):
+def process_thumbnail(annotated_thumbnail_callback, btm_range, experiment_id, hippo_predictor, images, section,
+                      cache_dir):
     proceed = False
-    thumbnail = download_thumbnail(images[section])
+    thumbnail = download_thumbnail(images[section], cache_dir)
     polygons, bbox, mask = predict_hippo(thumbnail, hippo_predictor)
     if polygons is not None:
         cbox, cmask, btm = calculate_areas(thumbnail, mask, bbox)
@@ -161,32 +174,48 @@ def create_crops_coords_list(crop_size, border_size, image):
     return crop_coords
 
 
-def create_annotated_scan(original, mask, filename):
-    original = original.copy()
+def create_annotated_scan(original, mask, filename_prefix, save_mask):
+    annotated = original.copy()
     mask = GenericMask(mask, *mask.shape)
     polygons = [poly.reshape(-1, 2) for poly in mask.polygons]
-    cv2.polylines(original, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
-    cv2.imwrite(filename, original)
+    cv2.polylines(annotated, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
+    cv2.imwrite(f'{filename_prefix}-annotated.jpg', annotated)
+    if save_mask:
+        cv2.imwrite(f'{filename_prefix}-mask.png', mask)
+        cv2.imwrite(f'{filename_prefix}-original.jpg', original)
 
 
-def predict_experiment(experiment_id, relevant_sections, hippo_predictor, cell_predictor, btm_range,
-                       crop_size, border_size, bbox_padding=0, annotated_thumbnail_callback=None):
+def predict_experiment(experiment_id, min_section, max_section, hippo_predictor,
+                       cell_predictor, min_btm, max_btm, crop_size, border_size,
+                       output_dir, cache=False, bbox_padding=0, device='cuda',
+                       threshold=0.5, save_mask=False,
+                       annotated_thumbnail_callback=None):
+    hippo_predictor = initialize_model(hippo_predictor, device, 0.5)
+    cell_predictor = initialize_model(cell_predictor, device, threshold)
     image_api = ImageDownloadApi()
     images = image_api.section_image_query(experiment_id)
     images = {i['section_number']: i for i in images}
+    output_dir = f'{output_dir}/{experiment_id}'
+    os.makedirs(output_dir, exist_ok=True)
 
-    for section_num, section in enumerate(relevant_sections):
-        proceed, bbox, mask = process_thumbnail(annotated_thumbnail_callback, btm_range, experiment_id, hippo_predictor,
-                                                images, section)
+    if cache:
+        cache_dir = f'{output_dir}/cache/{experiment_id}'
+        os.makedirs(f'{cache_dir}/{experiment_id}', exist_ok=True)
+    else:
+        cache_dir = None
+
+    for section_num, section in enumerate(range(min_section, max_section + 1)):
+        proceed, bbox, mask = process_thumbnail(annotated_thumbnail_callback, (min_btm, max_btm),
+                                                experiment_id, hippo_predictor,
+                                                images, section, cache_dir)
         if proceed:
             x1, y1, x2, y2 = bbox
             hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
             cell_mask = np.zeros_like(hippo_mask)
             bbox = np.asarray(bbox) * 64
-            image = cv2.cvtColor(download_full_scan(images[section], bbox), cv2.COLOR_BGR2GRAY)
+            image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
             crops = create_crops_list(border_size, crop_size, image)
-            for num, (crop, coords) in enumerate(crops):
-                print(f'Predicting crop {num} out of {len(crops)}...')
+            for crop, coords in tqdm(crops, desc=f"Predicting crops for {experiment_id}-{section}"):
                 outputs = cell_predictor(cv2.cvtColor(image[coords[0]: coords[0] + crop_size,
                                                       coords[1]: coords[1] + crop_size],
                                                       cv2.COLOR_GRAY2BGR))
@@ -195,7 +224,7 @@ def predict_experiment(experiment_id, relevant_sections, hippo_predictor, cell_p
                     np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
 
             mask = np.logical_and(hippo_mask, cell_mask)
-            create_annotated_scan(image, mask, f'{experiment_id}-{section}-annotated.jpg')
+            create_annotated_scan(image, mask, f'{output_dir}/{section}', save_mask)
 
 
 def initialize_model(model_path, device, threshold):
@@ -209,6 +238,25 @@ def initialize_model(model_path, device, threshold):
 
 
 if __name__ == '__main__':
-    hippo_predictor = initialize_model('output/model_final.pth', 'cuda', 0.5)
-    cell_predictor = initialize_model('output/model_cells.pth', 'cuda', 0.5)
-    predict_experiment(129564675, range(67, 83), hippo_predictor, cell_predictor, (5.5, 13.6), 312, 20)
+    parser = argparse.ArgumentParser(
+        description='Detectron Mask R-CNN for cells segmentation - experiment prediction')
+    parser.add_argument('--experiment_id', '-e', required=True, type=int, action='store', help='Experiment ID')
+    parser.add_argument('--cell_predictor', '-c', required=True, action='store', help='Cell model path')
+    parser.add_argument('--hippo_predictor', '-p', required=True, action='store', help='Hippocampus model path')
+    parser.add_argument('--output_dir', '-o', required=True, action='store', help='Directory that will contain output')
+
+    parser.add_argument('--min_section', default=63, action='store', help='Minimum section number to analyze')
+    parser.add_argument('--max_section', default=83, action='store', help='Maximum section number to analyze')
+    parser.add_argument('--min_btm', default=5.5, action='store', help='Minimum box-to-mask ratio to analyze')
+    parser.add_argument('--max_btm', default=13.6, action='store', help='Maximum box-to-mask ratio to analyze')
+    parser.add_argument('--bbox_padding', default=0, action='store', help='Padding (in pixels) for the hippocampus bounding box')
+    parser.add_argument('--cache', default=False, action='store_true', help='Cache the downloaded crops')
+
+    parser.add_argument('--crop_size', default=312, type=int, action='store', help='Size of a single crop')
+    parser.add_argument('--border_size', default=20, type=int, action='store',
+                        help='Size of the border (to make crops overlap)')
+    parser.add_argument('--device', default='cuda', action='store', help='Model execution device')
+    parser.add_argument('--threshold', default=0.5, action='store', help='Prediction threshold')
+    args = parser.parse_args()
+
+    predict_experiment(**vars(args))
