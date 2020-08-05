@@ -190,9 +190,10 @@ def predict_experiment(experiment_id, relevant_sections, hippo_predictor, cell_p
                                                                    coords[1]: coords[1] + crop_size],
                                                                    cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR))
                 _, mask = extract_predictions(outputs["instances"].to("cpu"))
-                cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] |= mask
+                cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
+                    np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
 
-            mask = hippo_mask & cell_mask
+            mask = np.logical_and(hippo_mask, cell_mask)
             create_annotated_scan(image, mask, f'{experiment_id}-{section}')
 
 
