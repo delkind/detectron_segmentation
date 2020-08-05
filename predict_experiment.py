@@ -183,19 +183,19 @@ def predict_experiment(experiment_id, relevant_sections, hippo_predictor, cell_p
             hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
             cell_mask = np.zeros_like(hippo_mask)
             bbox = np.asarray(bbox) * 64
-            image = download_full_scan(images[section], bbox)
+            image = cv2.cvtColor(download_full_scan(images[section], bbox), cv2.COLOR_BGR2GRAY)
             crops = create_crops_list(border_size, crop_size, image)
             for num, (crop, coords) in enumerate(crops):
                 print(f'Predicting crop {num} out of {len(crops)}...')
-                outputs = cell_predictor(cv2.cvtColor(cv2.cvtColor(image[coords[0]: coords[0] + crop_size,
-                                                                   coords[1]: coords[1] + crop_size],
-                                                                   cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR))
+                outputs = cell_predictor(cv2.cvtColor(image[coords[0]: coords[0] + crop_size,
+                                                      coords[1]: coords[1] + crop_size],
+                                                      cv2.COLOR_GRAY2BGR))
                 _, mask = extract_predictions(outputs["instances"].to("cpu"))
                 cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
                     np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
 
             mask = np.logical_and(hippo_mask, cell_mask)
-            create_annotated_scan(image, mask, f'{experiment_id}-{section}.jpg')
+            create_annotated_scan(image, mask, f'{experiment_id}-{section}-annotated.jpg')
 
 
 def initialize_model(model_path, device, threshold):
@@ -209,6 +209,6 @@ def initialize_model(model_path, device, threshold):
 
 
 if __name__ == '__main__':
-    hippo_predictor = initialize_model('output/model_final.pth', 'cpu', 0.5)
-    cell_predictor = initialize_model('output/model_cells.pth', 'cpu', 0.5)
+    hippo_predictor = initialize_model('output/model_final.pth', 'cuda', 0.5)
+    cell_predictor = initialize_model('output/model_cells.pth', 'cuda', 0.5)
     predict_experiment(129564675, range(67, 83), hippo_predictor, cell_predictor, (5.5, 13.6), 312, 20)
