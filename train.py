@@ -258,7 +258,7 @@ if __name__ == '__main__':
     parser.add_argument('--project', action='store', required=True)
     parser.add_argument('--crop_size', action='store', default=312, type=int)
     parser.add_argument('--batch_size', default=2, type=int, action='store', help='Some help')
-    parser.add_argument('--iterations', default=100000, type=int, action='store', help='Some help')
+    parser.add_argument('--iterations', default=1000000, type=int, action='store', help='Some help')
     parser.add_argument('--validation_split', default=10, type = int, action='store', help='Some help')
     parser.add_argument('--backbone', default='R_50_FPN_3x', action='store', help='Some help')
     parser.add_argument('--output_dir', required=True, action='store', help='Some help')
