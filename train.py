@@ -212,8 +212,9 @@ def get_balloon_dicts(img_dir, json_file):
 
 
 def main(image_dir, project, crop_size, batch_size, iterations, validation_split, backbone,
-         output_dir, learning_rate, device):
-    print(f'Tensorboard URL: {launch_tb(output_dir)}')
+         output_dir, learning_rate, device, tb, tb_port):
+    if tb:
+        print(f'Tensorboard URL: {launch_tb(output_dir, tb_port)}')
 
     DatasetCatalog.register("train", lambda: get_balloon_dicts(image_dir, project))
     MetadataCatalog.get("train").set(thing_classes=["balloon"])
@@ -243,10 +244,10 @@ def main(image_dir, project, crop_size, batch_size, iterations, validation_split
     trainer.train()
 
 
-def launch_tb(output_dir):
+def launch_tb(output_dir, port):
     from tensorboard import program
     tb = program.TensorBoard()
-    tb.configure(argv=[None, '--bind_all', '--logdir', output_dir])
+    tb.configure(argv=[None, '--bind_all', '--logdir', output_dir, '--port', port])
     return tb.launch()
 
 
@@ -263,6 +264,8 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', required=True, action='store', help='Some help')
     parser.add_argument('--learning_rate', default=0.00025, type=float, action='store', help='Some help')
     parser.add_argument('--device', default='cuda', action='store', help='Model execution device')
+    parser.add_argument('--tb', default=False, action='store_true', help='Start tensorboard')
+    parser.add_argument('--tb_port', default='6006', action='store', help='Tensorboard port')
     args = parser.parse_args()
     print(vars(args))
 
