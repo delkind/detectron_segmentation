@@ -110,7 +110,7 @@ def calculate_areas(image, mask, bbox):
     return cbox, cmask, btm
 
 
-def annotate_image(experiment, section, image, bbox, polygons, cbox, cmask, btm):
+def annotate_thumbnail(experiment, section, image, bbox, polygons, cbox, cmask, btm):
     def put_text(text, bottom):
         textsize = cv2.getTextSize(text, font, font_scale, thickness)[0]
         text_x = (image.shape[1] - textsize[0]) // 2
@@ -142,7 +142,7 @@ def process_thumbnail(annotated_thumbnail_callback, btm_range, experiment_id, hi
         if btm_range[0] <= btm <= btm_range[1]:
             xl, yl, xr, yr = bbox
             bbox = [xl - 5, yl - 5, xr + 5, yr + 5]
-            thumbnail = annotate_image(experiment_id, section, thumbnail, bbox, polygons, cbox, cmask, btm)
+            thumbnail = annotate_thumbnail(experiment_id, section, thumbnail, bbox, polygons, cbox, cmask, btm)
             if annotated_thumbnail_callback is not None:
                 annotated_thumbnail_callback(thumbnail, proceed)
             proceed = True
@@ -175,13 +175,13 @@ def create_crops_coords_list(crop_size, border_size, image):
 
 
 def create_annotated_scan(original, mask, filename_prefix, save_mask):
-    annotated = original.copy()
-    mask = GenericMask(mask, *mask.shape)
-    polygons = [poly.reshape(-1, 2) for poly in mask.polygons]
+    annotated = cv2.cvtColor(original, cv2.COLOR_GRAY2BGR)
+    gmask = GenericMask(mask, *mask.shape)
+    polygons = [poly.reshape(-1, 2) for poly in gmask.polygons]
     cv2.polylines(annotated, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
     cv2.imwrite(f'{filename_prefix}-annotated.jpg', annotated)
     if save_mask:
-        cv2.imwrite(f'{filename_prefix}-mask.png', mask)
+        cv2.imwrite(f'{filename_prefix}-mask.png', mask.astype(np.uint8) * 255)
         cv2.imwrite(f'{filename_prefix}-original.jpg', original)
 
 
