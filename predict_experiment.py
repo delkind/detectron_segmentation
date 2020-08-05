@@ -83,7 +83,8 @@ def download_section_image(image_path, zoom, description, box=None, filename=Non
         url += f'&top={y1}&left={x1}&width={x2 - x1}&height={y2 - y1}'
     temp_file = download_url(url, decription=description, filename=filename)
     image = cv2.imread(temp_file, cv2.IMREAD_COLOR)
-    os.remove(temp_file)
+    if filename is None:
+        os.remove(temp_file)
     return image
 
 
