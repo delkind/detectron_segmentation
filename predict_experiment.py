@@ -185,6 +185,29 @@ def create_annotated_scan(original, mask, filename_prefix, save_mask):
         cv2.imwrite(f'{filename_prefix}-original.jpg', original)
 
 
+def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image, output_dir, save_mask,
+                  section):
+    crops = create_crops_list(border_size, crop_size, image)
+    cell_mask = np.zeros_like(hippo_mask)
+    for crop, coords in tqdm(crops, desc=f"Predicting crops for {experiment_id}-{section}"):
+        outputs = cell_predictor(cv2.cvtColor(image[coords[0]: coords[0] + crop_size,
+                                              coords[1]: coords[1] + crop_size],
+                                              cv2.COLOR_GRAY2BGR))
+        _, mask = extract_predictions(outputs["instances"].to("cpu"))
+        cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
+            np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
+    mask = np.logical_and(hippo_mask, cell_mask)
+    create_annotated_scan(image, mask, f'{output_dir}/{experiment_id}-{section}', save_mask)
+
+
+def obtain_full_scan(bbox, cache_dir, images, mask, section):
+    x1, y1, x2, y2 = bbox
+    hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
+    bbox = np.asarray(bbox) * 64
+    image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
+    return hippo_mask, image
+
+
 def predict_experiment(experiment_id, min_section, max_section, hippo_predictor,
                        cell_predictor, min_btm, max_btm, crop_size, border_size,
                        output_dir, cache=False, bbox_padding=0, device='cuda',
@@ -195,36 +218,24 @@ def predict_experiment(experiment_id, min_section, max_section, hippo_predictor,
     image_api = ImageDownloadApi()
     images = image_api.section_image_query(experiment_id)
     images = {i['section_number']: i for i in images}
-    output_dir = f'{output_dir}/{experiment_id}'
-    os.makedirs(output_dir, exist_ok=True)
 
     if cache:
         cache_dir = f'{output_dir}/cache/{experiment_id}'
-        os.makedirs(f'{cache_dir}/{experiment_id}', exist_ok=True)
+        os.makedirs(cache_dir, exist_ok=True)
     else:
         cache_dir = None
+
+    output_dir = f'{output_dir}/{experiment_id}'
+    os.makedirs(output_dir, exist_ok=True)
 
     for section_num, section in enumerate(range(min_section, max_section + 1)):
         proceed, bbox, mask = process_thumbnail(annotated_thumbnail_callback, (min_btm, max_btm),
                                                 experiment_id, hippo_predictor,
                                                 images, section, cache_dir)
         if proceed:
-            x1, y1, x2, y2 = bbox
-            hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
-            cell_mask = np.zeros_like(hippo_mask)
-            bbox = np.asarray(bbox) * 64
-            image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
-            crops = create_crops_list(border_size, crop_size, image)
-            for crop, coords in tqdm(crops, desc=f"Predicting crops for {experiment_id}-{section}"):
-                outputs = cell_predictor(cv2.cvtColor(image[coords[0]: coords[0] + crop_size,
-                                                      coords[1]: coords[1] + crop_size],
-                                                      cv2.COLOR_GRAY2BGR))
-                _, mask = extract_predictions(outputs["instances"].to("cpu"))
-                cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
-                    np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
-
-            mask = np.logical_and(hippo_mask, cell_mask)
-            create_annotated_scan(image, mask, f'{output_dir}/{section}', save_mask)
+            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section)
+            predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image, output_dir,
+                          save_mask, section)
 
 
 def initialize_model(model_path, device, threshold):
