@@ -212,7 +212,7 @@ def get_balloon_dicts(img_dir, json_file):
 
 
 def main(image_dir, project, crop_size, batch_size, iterations, validation_split, backbone,
-         output_dir, learning_rate, device, tb, tb_port):
+         output_dir, learning_rate, device, tb, tb_port, resume=None):
     if tb:
         print(f'Tensorboard URL: {launch_tb(output_dir, tb_port)}')
 
@@ -227,8 +227,11 @@ def main(image_dir, project, crop_size, batch_size, iterations, validation_split
     cfg.DATASETS.TRAIN = ("train", )
     cfg.DATASETS.TEST = ()
     cfg.DATALOADER.NUM_WORKERS = 2
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
-        f"COCO-InstanceSegmentation/mask_rcnn_{backbone}.yaml")  # Let training initialize from model zoo
+    if resume:
+        cfg.MODEL.WEIGHTS = resume
+    else:
+        cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
+            f"COCO-InstanceSegmentation/mask_rcnn_{backbone}.yaml")  # Let training initialize from model zoo
     cfg.SOLVER.IMS_PER_BATCH = batch_size
     cfg.SOLVER.BASE_LR = learning_rate  # pick a good LR
     cfg.SOLVER.MAX_ITER = iterations  # 300 iterations seems good enough for this toy dataset; you may need to train longer for a practical dataset
@@ -262,6 +265,7 @@ if __name__ == '__main__':
     parser.add_argument('--validation_split', default=10, type = int, action='store', help='Some help')
     parser.add_argument('--backbone', default='R_50_FPN_3x', action='store', help='Some help')
     parser.add_argument('--output_dir', required=True, action='store', help='Some help')
+    parser.add_argument('--resume', required=False, action='store', help='Some help')
     parser.add_argument('--learning_rate', default=0.00025, type=float, action='store', help='Some help')
     parser.add_argument('--device', default='cuda', action='store', help='Model execution device')
     parser.add_argument('--tb', default=False, action='store_true', help='Start tensorboard')
