@@ -174,19 +174,23 @@ def create_crops_coords_list(crop_size, border_size, image):
     return crop_coords
 
 
-def create_annotated_scan(original, mask, filename_prefix, save_mask):
+def create_annotated_scan(original, cell_mask, hippo_mask, filename_prefix, save_mask):
     annotated = cv2.cvtColor(original, cv2.COLOR_GRAY2BGR)
-    gmask = GenericMask(mask, *mask.shape)
+    gmask = GenericMask(cell_mask, *cell_mask.shape)
     polygons = [poly.reshape(-1, 2) for poly in gmask.polygons]
+    gmask = GenericMask(hippo_mask, *hippo_mask.shape)
+    polygons += [poly.reshape(-1, 2) for poly in gmask.polygons]
     cv2.polylines(annotated, polygons, isClosed=True, color=(0, 255, 0), thickness=3)
+    annotated = cv2.resize(annotated, (0, 0), fx=0.25, fy=0.25)
     cv2.imwrite(f'{filename_prefix}-annotated.jpg', annotated)
     if save_mask:
-        cv2.imwrite(f'{filename_prefix}-mask.png', mask.astype(np.uint8) * 255)
+        if cell_mask is not None:
+            cv2.imwrite(f'{filename_prefix}-cellmask.png', cell_mask.astype(np.uint8) * 255)
+        cv2.imwrite(f'{filename_prefix}-hippomask.png', hippo_mask.astype(np.uint8) * 255)
         cv2.imwrite(f'{filename_prefix}-original.jpg', original)
 
 
-def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image, output_dir, save_mask,
-                  section):
+def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image, section):
     crops = create_crops_list(border_size, crop_size, image)
     cell_mask = np.zeros_like(hippo_mask)
     for crop, coords in tqdm(crops, desc=f"Predicting crops for {experiment_id}-{section}"):
@@ -197,7 +201,7 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_m
         cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
             np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
     mask = np.logical_and(hippo_mask, cell_mask)
-    create_annotated_scan(image, mask, f'{output_dir}/{experiment_id}-{section}', save_mask)
+    return mask
 
 
 def obtain_full_scan(bbox, cache_dir, images, mask, section):
@@ -208,34 +212,47 @@ def obtain_full_scan(bbox, cache_dir, images, mask, section):
     return hippo_mask, image
 
 
-def predict_experiment(experiment_id, min_section, max_section, hippo_predictor,
-                       cell_predictor, min_btm, max_btm, crop_size, border_size,
-                       output_dir, cache=False, bbox_padding=0, device='cuda',
-                       threshold=0.5, save_mask=False,
-                       annotated_thumbnail_callback=None):
-    hippo_predictor = initialize_model(hippo_predictor, device, 0.5)
-    cell_predictor = initialize_model(cell_predictor, device, threshold)
-    image_api = ImageDownloadApi()
+def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size, experiment_id,
+                       hippo_predictor, image_api, max_btm, max_section, min_btm, min_section, output_dir, save_mask):
     images = image_api.section_image_query(experiment_id)
     images = {i['section_number']: i for i in images}
-
     if cache:
         cache_dir = f'{output_dir}/cache/{experiment_id}'
         os.makedirs(cache_dir, exist_ok=True)
     else:
         cache_dir = None
-
     output_dir = f'{output_dir}/{experiment_id}'
     os.makedirs(output_dir, exist_ok=True)
-
     for section_num, section in enumerate(range(min_section, max_section + 1)):
         proceed, bbox, mask = process_thumbnail(annotated_thumbnail_callback, (min_btm, max_btm),
                                                 experiment_id, hippo_predictor,
                                                 images, section, cache_dir)
         if proceed:
             hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section)
-            predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image, output_dir,
-                          save_mask, section)
+
+            if cell_predictor is not None:
+                cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
+                                          section)
+            else:
+                cell_mask = None
+
+            create_annotated_scan(image, cell_mask, hippo_mask, f'{output_dir}/{experiment_id}-{section}',
+                                  save_mask)
+
+
+def main(experiment_ids, min_section, max_section, hippo_predictor,
+         cell_predictor, min_btm, max_btm, crop_size, border_size,
+         output_dir, cache=False, bbox_padding=0, device='cuda',
+         threshold=0.5, save_mask=False,
+         annotated_thumbnail_callback=None):
+    hippo_predictor = initialize_model(hippo_predictor, device, 0.5)
+    if cell_predictor is not None:
+        cell_predictor = initialize_model(cell_predictor, device, threshold)
+    image_api = ImageDownloadApi()
+    for experiment_id in experiment_ids.split(','):
+        predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size,
+                           int(experiment_id), hippo_predictor, image_api, max_btm, max_section, min_btm, min_section,
+                           output_dir, save_mask)
 
 
 def initialize_model(model_path, device, threshold):
@@ -251,8 +268,8 @@ def initialize_model(model_path, device, threshold):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Detectron Mask R-CNN for cells segmentation - experiment prediction')
-    parser.add_argument('--experiment_id', '-e', required=True, type=int, action='store', help='Experiment ID')
-    parser.add_argument('--cell_predictor', '-c', required=True, action='store', help='Cell model path')
+    parser.add_argument('--experiment_ids', '-e', required=True, action='store', help='Experiment ID')
+    parser.add_argument('--cell_predictor', '-c', default=None, action='store', help='Cell model path')
     parser.add_argument('--hippo_predictor', '-p', required=True, action='store', help='Hippocampus model path')
     parser.add_argument('--output_dir', '-o', required=True, action='store', help='Directory that will contain output')
 
@@ -272,4 +289,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     print(vars(args))
-    predict_experiment(**vars(args))
+    main(**vars(args))
