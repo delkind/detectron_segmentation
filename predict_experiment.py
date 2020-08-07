@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import os
+import random
 import urllib.request
 
 import cv2
@@ -142,10 +143,10 @@ def process_thumbnail(annotated_thumbnail_callback, btm_range, experiment_id, hi
         if btm_range[0] <= btm <= btm_range[1]:
             xl, yl, xr, yr = bbox
             bbox = [xl - 5, yl - 5, xr + 5, yr + 5]
-            thumbnail = annotate_thumbnail(experiment_id, section, thumbnail, bbox, polygons, cbox, cmask, btm)
-            if annotated_thumbnail_callback is not None:
-                annotated_thumbnail_callback(thumbnail, proceed)
             proceed = True
+        if annotated_thumbnail_callback is not None:
+            thumbnail = annotate_thumbnail(experiment_id, section, thumbnail, bbox, polygons, cbox, cmask, btm)
+            annotated_thumbnail_callback(thumbnail, proceed, section)
         else:
             print(f"Skipping section {section}: BTM is not in range")
     else:
@@ -212,8 +213,45 @@ def obtain_full_scan(bbox, cache_dir, images, mask, section):
     return hippo_mask, image
 
 
+def get_hippocampal_struct_ids(mcc):
+    # grab the StructureTree instance
+    structure_tree = mcc.get_structure_tree()
+    # get info on some structures
+    structures = structure_tree.get_structures_by_name(['Hippocampal formation', 'Hippocampal region'])
+    hippocampal_formation_id = structures[0]['id']
+    old_children = set()
+    new_children = {hippocampal_formation_id}
+    while new_children != old_children:
+        old_children = new_children
+        children = structure_tree.child_ids(old_children)
+        new_children = set(list(old_children) + [c for l in children for c in l])
+    return new_children
+
+
+def get_all_experiments(output_dir):
+    from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+    from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
+    mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
+                                 resolution=MouseConnectivityApi.VOXEL_RESOLUTION_100_MICRONS)
+    experiments = mcc.get_experiments(dataframe=False)
+    new_children = get_hippocampal_struct_ids(mcc)
+    experiments = [e['id'] for e in experiments if not new_children.issuperset(e['injection_structures'])]
+    return experiments
+
+
+def sample_experiments(experiments_count, output_dir):
+    experiments = get_all_experiments(output_dir)
+    blacklist = get_downloaded_experiments(output_dir)
+    return random.sample(list(filter(lambda i: i not in blacklist, experiments)), experiments_count)
+
+
+def get_downloaded_experiments(output_dir):
+    return {int(f) for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f)) and f.isdecimal()}
+
+
 def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size, experiment_id,
-                       hippo_predictor, image_api, max_btm, max_section, min_btm, min_section, output_dir, save_mask):
+                       hippo_predictor, image_api, max_btm, max_section, min_btm, min_section, output_dir, save_mask,
+                       bbox_padding):
     print(f'Processing experiment {experiment_id}...')
     images = image_api.section_image_query(experiment_id)
     images = {i['section_number']: i for i in images}
@@ -230,7 +268,6 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
                                                 images, section, cache_dir)
         if proceed:
             hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section)
-
             if cell_predictor is not None:
                 cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
                                           section)
@@ -244,16 +281,24 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
 def main(experiment_ids, min_section, max_section, hippo_predictor,
          cell_predictor, min_btm, max_btm, crop_size, border_size,
          output_dir, cache=False, bbox_padding=0, device='cuda',
-         threshold=0.5, save_mask=False,
-         annotated_thumbnail_callback=None):
+         threshold=0.5, save_mask=False):
     hippo_predictor = initialize_model(hippo_predictor, device, 0.5)
     if cell_predictor is not None:
         cell_predictor = initialize_model(cell_predictor, device, threshold)
     image_api = ImageDownloadApi()
-    for experiment_id in experiment_ids.split(','):
-        predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size,
+
+    if experiment_ids == 'rescan':
+        experiment_ids = get_downloaded_experiments(output_dir)
+    elif experiment_ids.startswith('discover:'):
+        experiment_ids = sample_experiments(int(experiment_ids.split(':')[1]), output_dir)
+    else:
+        experiment_ids = experiment_ids.split(',')
+
+    for experiment_id in experiment_ids:
+        predict_experiment(lambda t, p, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
+                           border_size, cache, cell_predictor, crop_size,
                            int(experiment_id), hippo_predictor, image_api, max_btm, max_section, min_btm, min_section,
-                           output_dir, save_mask)
+                           output_dir, save_mask, bbox_padding)
 
 
 def initialize_model(model_path, device, threshold):
@@ -278,7 +323,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_section', default=83, action='store', help='Maximum section number to analyze')
     parser.add_argument('--min_btm', default=5.5, action='store', help='Minimum box-to-mask ratio to analyze')
     parser.add_argument('--max_btm', default=13.6, action='store', help='Maximum box-to-mask ratio to analyze')
-    parser.add_argument('--bbox_padding', default=0, action='store', help='Padding (in pixels) for the hippocampus bounding box')
+    parser.add_argument('--bbox_padding', default=0, action='store',
+                        help='Padding (in pixels) for the hippocampus bounding box')
     parser.add_argument('--cache', default=False, action='store_true', help='Cache the downloaded crops')
     parser.add_argument('--save_mask', default=True, action='store_true', help='Cache the downloaded crops')
 
