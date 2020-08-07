@@ -214,6 +214,7 @@ def obtain_full_scan(bbox, cache_dir, images, mask, section):
 
 def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size, experiment_id,
                        hippo_predictor, image_api, max_btm, max_section, min_btm, min_section, output_dir, save_mask):
+    print(f'Processing experiment {experiment_id}...')
     images = image_api.section_image_query(experiment_id)
     images = {i['section_number']: i for i in images}
     if cache:
