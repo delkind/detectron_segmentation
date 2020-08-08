@@ -207,11 +207,11 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_m
     return mask
 
 
-def obtain_full_scan(bbox, cache_dir, images, hippo_predictor, section, bbox_padding):
+def obtain_full_scan(bbox, cache_dir, images, hippo_mask, section, bbox_padding):
     x1, y1, x2, y2 = bbox
     bbox = np.asarray([x1 - bbox_padding, y1 - bbox_padding, x2 + bbox_padding, y2 + bbox_padding]) * 64
     image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
-    polygons, bbox, hippo_mask = predict_hippo(image, hippo_predictor)
+    hippo_mask = cv2.resize(hippo_mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
     return hippo_mask, image
 
 
