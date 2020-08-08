@@ -207,11 +207,11 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_m
     return mask
 
 
-def obtain_full_scan(bbox, cache_dir, images, hippo_mask, section, bbox_padding):
+def obtain_full_scan(bbox, cache_dir, images, mask, section):
     x1, y1, x2, y2 = bbox
-    bbox = np.asarray([x1 - bbox_padding, y1 - bbox_padding, x2 + bbox_padding, y2 + bbox_padding]) * 64
+    hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
+    bbox = np.asarray(bbox) * 64
     image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
-    hippo_mask = cv2.resize(hippo_mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
     return hippo_mask, image
 
 
@@ -272,7 +272,7 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
                                                 experiment_id, hippo_predictor,
                                                 images, section, cache_dir)
         if proceed:
-            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section, bbox_padding)
+            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section)
             if cell_predictor is not None:
                 cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
                                           section)
