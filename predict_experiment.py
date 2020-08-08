@@ -272,7 +272,7 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
                                                 experiment_id, hippo_predictor,
                                                 images, section, cache_dir)
         if proceed:
-            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, hippo_predictor, section, bbox_padding)
+            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section, bbox_padding)
             if cell_predictor is not None:
                 cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
                                           section)
