@@ -324,10 +324,12 @@ if __name__ == '__main__':
     parser.add_argument('--hippo_predictor', '-p', required=True, action='store', help='Hippocampus model path')
     parser.add_argument('--output_dir', '-o', required=True, action='store', help='Directory that will contain output')
 
-    parser.add_argument('--min_section', default=63, action='store', help='Minimum section number to analyze')
-    parser.add_argument('--max_section', default=83, action='store', help='Maximum section number to analyze')
-    parser.add_argument('--min_btm', default=5.5, action='store', help='Minimum box-to-mask ratio to analyze')
-    parser.add_argument('--max_btm', default=13.6, action='store', help='Maximum box-to-mask ratio to analyze')
+    parser.add_argument('--min_section', default=63, type=int, action='store', help='Minimum section number to analyze')
+    parser.add_argument('--max_section', default=83, type=int, action='store', help='Maximum section number to analyze')
+    parser.add_argument('--min_btm', default=5.5, type=float, action='store',
+                        help='Minimum box-to-mask ratio to analyze')
+    parser.add_argument('--max_btm', default=13.6, type=float, action='store',
+                        help='Maximum box-to-mask ratio to analyze')
     parser.add_argument('--bbox_padding', default=0, action='store',
                         help='Padding (in pixels) for the hippocampus bounding box')
     parser.add_argument('--cache', default=False, action='store_true', help='Cache the downloaded crops')
