@@ -50,7 +50,9 @@ def extract_predictions(predictions):
 
 
 def predict_hippo(image, predictor):
-    outputs = predictor(cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR))
+    if image.shape[2] > 1:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    outputs = predictor(cv2.cvtColor(image, cv2.COLOR_GRAY2BGR))
     polygons, mask = extract_predictions(outputs["instances"].to("cpu"))
     if polygons is None or mask is None:
         return None, None, None
