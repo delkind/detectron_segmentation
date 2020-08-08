@@ -207,9 +207,11 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_m
     return mask
 
 
-def obtain_full_scan(bbox, cache_dir, images, mask, section):
+def obtain_full_scan(bbox, cache_dir, images, mask, section, padding):
     x1, y1, x2, y2 = bbox
-    hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
+    bbox = [x1 - padding, y1 - padding, x2 + padding, y2 + padding]
+    hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64,
+                            interpolation=cv2.INTER_CUBIC).astype(bool)
     bbox = np.asarray(bbox) * 64
     image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
     return hippo_mask, image
@@ -255,8 +257,8 @@ image_api = ImageDownloadApi()
 
 
 def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size, experiment_id,
-                       hippo_predictor, max_btm, max_section, min_btm, min_section, output_dir, save_mask,
-                       bbox_padding):
+                       hippo_predictor, max_btm, max_section, min_btm, min_section, output_dir, save_mask, bbox_padding,
+                       resume):
     print(f'Processing experiment {experiment_id}...')
     images = image_api.section_image_query(experiment_id)
     images = {i['section_number']: i for i in images}
@@ -272,15 +274,18 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
                                                 experiment_id, hippo_predictor,
                                                 images, section, cache_dir)
         if proceed:
-            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section)
-            if cell_predictor is not None:
-                cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
-                                          section)
+            if resume and os.path.isfile(f'{output_dir}/{experiment_id}-{section}-annotated.jpg'):
+                print(f"Skipping {experiment_id}-{section}, already processed")
             else:
-                cell_mask = None
+                hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section, bbox_padding)
+                if cell_predictor is not None:
+                    cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
+                                              section)
+                else:
+                    cell_mask = None
 
-            create_annotated_scan(image, cell_mask, hippo_mask, f'{output_dir}/{experiment_id}-{section}',
-                                  save_mask)
+                create_annotated_scan(image, cell_mask, hippo_mask, f'{output_dir}/{experiment_id}-{section}',
+                                      save_mask)
 
 
 def main(experiment_ids, min_section, max_section, hippo_predictor,
@@ -290,9 +295,13 @@ def main(experiment_ids, min_section, max_section, hippo_predictor,
     hippo_predictor = initialize_model(hippo_predictor, device, 0.5)
     if cell_predictor is not None:
         cell_predictor = initialize_model(cell_predictor, device, threshold)
+    resume = False
 
     if experiment_ids == 'rescan':
         experiment_ids = get_downloaded_experiments(output_dir)
+    elif experiment_ids == 'resume':
+        experiment_ids = get_downloaded_experiments(output_dir)
+        resume = True
     elif experiment_ids.startswith('discover:'):
         experiment_ids = sample_experiments(int(experiment_ids.split(':')[1]), output_dir)
     else:
@@ -303,7 +312,7 @@ def main(experiment_ids, min_section, max_section, hippo_predictor,
             lambda t, p, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
             border_size, cache, cell_predictor, crop_size,
             int(experiment_id), hippo_predictor, max_btm, max_section, min_btm, min_section,
-            output_dir, save_mask, bbox_padding)
+            output_dir, save_mask, bbox_padding, resume)
 
 
 def initialize_model(model_path, device, threshold):
