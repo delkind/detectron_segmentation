@@ -205,11 +205,11 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_m
     return mask
 
 
-def obtain_full_scan(bbox, cache_dir, images, mask, section):
+def obtain_full_scan(bbox, cache_dir, images, hippo_predictor, section, bbox_padding):
     x1, y1, x2, y2 = bbox
-    hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64).astype(bool)
-    bbox = np.asarray(bbox) * 64
+    bbox = np.asarray([x1 - bbox_padding, y1 - bbox_padding, x2 + bbox_padding, y2 + bbox_padding]) * 64
     image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
+    polygons, bbox, hippo_mask = predict_hippo(image, hippo_predictor)
     return hippo_mask, image
 
 
@@ -249,8 +249,11 @@ def get_downloaded_experiments(output_dir):
     return {int(f) for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f)) and f.isdecimal()}
 
 
+image_api = ImageDownloadApi()
+
+
 def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size, experiment_id,
-                       hippo_predictor, image_api, max_btm, max_section, min_btm, min_section, output_dir, save_mask,
+                       hippo_predictor, max_btm, max_section, min_btm, min_section, output_dir, save_mask,
                        bbox_padding):
     print(f'Processing experiment {experiment_id}...')
     images = image_api.section_image_query(experiment_id)
@@ -267,7 +270,7 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
                                                 experiment_id, hippo_predictor,
                                                 images, section, cache_dir)
         if proceed:
-            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section)
+            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, hippo_predictor, section, bbox_padding)
             if cell_predictor is not None:
                 cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
                                           section)
@@ -285,7 +288,6 @@ def main(experiment_ids, min_section, max_section, hippo_predictor,
     hippo_predictor = initialize_model(hippo_predictor, device, 0.5)
     if cell_predictor is not None:
         cell_predictor = initialize_model(cell_predictor, device, threshold)
-    image_api = ImageDownloadApi()
 
     if experiment_ids == 'rescan':
         experiment_ids = get_downloaded_experiments(output_dir)
@@ -295,10 +297,11 @@ def main(experiment_ids, min_section, max_section, hippo_predictor,
         experiment_ids = experiment_ids.split(',')
 
     for experiment_id in experiment_ids:
-        predict_experiment(lambda t, p, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
-                           border_size, cache, cell_predictor, crop_size,
-                           int(experiment_id), hippo_predictor, image_api, max_btm, max_section, min_btm, min_section,
-                           output_dir, save_mask, bbox_padding)
+        predict_experiment(
+            lambda t, p, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
+            border_size, cache, cell_predictor, crop_size,
+            int(experiment_id), hippo_predictor, max_btm, max_section, min_btm, min_section,
+            output_dir, save_mask, bbox_padding)
 
 
 def initialize_model(model_path, device, threshold):
