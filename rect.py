@@ -28,6 +28,9 @@ class Rect(namedtuple("RectBase", ['x', 'y', 'w', 'h'])):
     def pad(self, padding_x, padding_y):
         return Rect(self.x - padding_x, self.y - padding_y, self.w + padding_x, self.h + padding_y)
 
+    def corners(self):
+        return (self.x, self.y), (self.x + self.w, self.y + self.h)
+
     def union(self, rect):
         if rect == self:
             return self
