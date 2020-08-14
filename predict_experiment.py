@@ -64,11 +64,14 @@ def predict_hippo(image, predictor):
     return polygons, bbox, mask
 
 
-def create_file_name(cache_dir, image_desc, suffix):
+def create_file_name(cache_dir, image_desc, suffix, box=None):
     dataset_id = image_desc["data_set_id"]
     section_number = image_desc["section_number"]
     if cache_dir:
-        filename = f'{cache_dir}/{section_number}-{suffix}.jpg'
+        if box is None:
+            filename = f'{cache_dir}/{section_number}-{suffix}.jpg'
+        else:
+            filename = f'{cache_dir}/{box[0]}_{box[1]}_{box[2]}_{box[3]}-{section_number}-{suffix}.jpg'
     else:
         filename = None
     return dataset_id, filename, section_number
@@ -82,7 +85,7 @@ def download_thumbnail(image_desc, cache_dir):
 
 
 def download_full_scan(image_desc, box, cache_dir):
-    dataset_id, filename, section_number = create_file_name(cache_dir, image_desc, 'full')
+    dataset_id, filename, section_number = create_file_name(cache_dir, image_desc, 'full', box)
     dataset_id = image_desc["data_set_id"]
     return download_section_image(image_desc["path"], 8,
                                   f'Downloading full scan for experiment {dataset_id} '
@@ -177,6 +180,13 @@ def create_crops_coords_list(crop_size, border_size, image):
     return crop_coords
 
 
+def mask_to_contour(mask):
+    ctrs, _ = cv2.findContours((mask * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    mask = np.zeros((*mask.shape, 4), dtype=np.uint8)
+    cv2.polylines(mask, ctrs, True, color=(0, 255, 0, 255))
+    return mask
+
+
 def create_annotated_scan(original, cell_mask, hippo_mask, filename_prefix, save_mask):
     annotated = cv2.cvtColor(original, cv2.COLOR_GRAY2BGR)
     gmask = GenericMask(cell_mask, *cell_mask.shape)
@@ -187,15 +197,15 @@ def create_annotated_scan(original, cell_mask, hippo_mask, filename_prefix, save
     annotated = cv2.resize(annotated, (0, 0), fx=0.25, fy=0.25)
     cv2.imwrite(f'{filename_prefix}-annotated.jpg', annotated)
     if save_mask:
-        if cell_mask is not None:
-            cv2.imwrite(f'{filename_prefix}-cellmask.png', cell_mask.astype(np.uint8) * 255)
-        cv2.imwrite(f'{filename_prefix}-hippomask.png', hippo_mask.astype(np.uint8) * 255)
         cv2.imwrite(f'{filename_prefix}-original.jpg', original)
+        cv2.imwrite(f'{filename_prefix}-hippomask.png', mask_to_contour(hippo_mask))
+        if cell_mask is not None:
+            cv2.imwrite(f'{filename_prefix}-cellmask.png', mask_to_contour(cell_mask))
 
 
-def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image, section):
+def predict_cells(border_size, cell_predictor, crop_size, experiment_id, image, section):
     crops = create_crops_list(border_size, crop_size, image)
-    cell_mask = np.zeros_like(hippo_mask)
+    cell_mask = np.zeros(image.shape[:2], dtype=np.uint8)
     for crop, coords in tqdm(crops, desc=f"Predicting crops for {experiment_id}-{section}"):
         outputs = cell_predictor(cv2.cvtColor(image[coords[0]: coords[0] + crop_size,
                                               coords[1]: coords[1] + crop_size],
@@ -203,8 +213,11 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_m
         _, mask = extract_predictions(outputs["instances"].to("cpu"))
         cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
             np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
-    mask = np.logical_and(hippo_mask, cell_mask)
-    return mask
+
+    ctrs, _ = cv2.findContours(cell_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    mask = np.zeros_like(cell_mask)
+    cv2.fillPoly(mask, ctrs, color=255)
+    return mask.astype(bool)
 
 
 def obtain_full_scan(bbox, cache_dir, images, mask, section, padding):
@@ -212,6 +225,7 @@ def obtain_full_scan(bbox, cache_dir, images, mask, section, padding):
     bbox = [x1 - padding, y1 - padding, x2 + padding, y2 + padding]
     hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64,
                             interpolation=cv2.INTER_CUBIC).astype(bool)
+    ctrs, _ = cv2.findContours((hippo_mask * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     bbox = np.asarray(bbox) * 64
     image = cv2.cvtColor(download_full_scan(images[section], bbox, cache_dir), cv2.COLOR_BGR2GRAY)
     return hippo_mask, image
@@ -279,8 +293,7 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
             else:
                 hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section, bbox_padding)
                 if cell_predictor is not None:
-                    cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, hippo_mask, image,
-                                              section)
+                    cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, image, section)
                 else:
                     cell_mask = None
 
