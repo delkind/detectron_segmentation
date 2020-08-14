@@ -211,8 +211,9 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, image, 
                                               coords[1]: coords[1] + crop_size],
                                               cv2.COLOR_GRAY2BGR))
         _, mask = extract_predictions(outputs["instances"].to("cpu"))
-        cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
-            np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
+        if mask is not None:
+            cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size] = \
+                np.logical_or(cell_mask[coords[0]: coords[0] + crop_size, coords[1]: coords[1] + crop_size], mask)
 
     ctrs, _ = cv2.findContours(cell_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     mask = np.zeros_like(cell_mask)
