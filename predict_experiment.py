@@ -320,7 +320,7 @@ def main(experiment_ids, min_section, max_section, hippo_predictor,
     else:
         experiment_ids = experiment_ids.split(',')
 
-    for experiment_id in experiment_ids:
+    for experiment_id in sorted(experiment_ids):
         predict_experiment(
             lambda t, p, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
             border_size, cache, cell_predictor, crop_size,
