@@ -318,6 +318,9 @@ def main(experiment_ids, min_section, max_section, hippo_predictor,
         resume = True
     elif experiment_ids.startswith('discover:'):
         experiment_ids = sample_experiments(int(experiment_ids.split(':')[1]), output_dir)
+    elif experiment_ids.startswith('rediscover:'):
+        experiment_ids = sample_experiments(int(experiment_ids.split(':')[1]) -
+                                            len(get_downloaded_experiments(output_dir)), output_dir)
     else:
         experiment_ids = experiment_ids.split(',')
 
