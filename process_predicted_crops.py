@@ -2,13 +2,14 @@ import argparse
 import json
 import os
 import pickle
+from os import listdir
+from os.path import isfile, join
 
 import cv2
 import numpy as np
 from detectron2.utils.visualizer import GenericMask
 
-from normalize_scans import get_eq_func
-from predict_crops import create_crops_coords_list
+from predict_experiment import create_crops_coords_list
 from rect import Rect
 
 source = """
@@ -53,6 +54,20 @@ source = """
 """
 
 
+def get_eq_func(images):
+    bins_edges_min_max = [0, 256]
+    num_bins = 256
+    bin_count = np.zeros(256, dtype=float)
+    for image in images:
+        bin_count_img, _ = np.histogram(image, num_bins, bins_edges_min_max)
+        bin_count += bin_count_img
+
+    pdf = bin_count / np.sum(bin_count)
+    cdf = np.cumsum(pdf)
+    f_eq = np.round(cdf * 255).astype(int)
+    return f_eq
+
+
 def create_file_entry(file_path, polygons):
     regions = []
     for annotation in polygons:
@@ -61,6 +76,9 @@ def create_file_entry(file_path, polygons):
         for (x, y) in annotation.tolist():
             all_points_x += [x]
             all_points_y += [y]
+
+        if len(set(all_points_x)) == 1 or len(set(all_points_y)) == 1:
+            continue
 
         regions += [{
             "region_attributes": {},
@@ -118,7 +136,7 @@ def to_polygons(predictions):
             return None
 
         masks = np.asarray(predictions.pred_masks)
-        masks = [GenericMask(x, 312, 312) for x in masks]
+        masks = [GenericMask(x, x.shape[0], x.shape[1]) for x in masks]
 
     polygons = [poly.reshape(-1, 2) for mask in masks for poly in mask.polygons]
     return polygons
@@ -146,16 +164,15 @@ def group_by_rows(crops):
     return crops
 
 
-def create_rois_list(crops, full_image, project_size=10):
-    resized = full_image
-    # resized = cv2.resize(full_image, (0, 0), fx=0.25, fy=0.25)
-    rois = cv2.selectROIs("Select region to edit", resized)
+def create_rois_list(window_title, crops, full_image, project_size=10):
+    shrink_factor = 5
+    resized = cv2.resize(full_image, (0, 0), fx=1/shrink_factor, fy=1/shrink_factor)
+    rois = cv2.selectROIs(window_title, resized)
+    cv2.destroyAllWindows()
     if type(rois) is not tuple:
-        rois = [Rect(*roi) for roi in (rois * 4).tolist()]
+        rois = [Rect(*roi) for roi in (rois * shrink_factor).tolist()]
         crops = [[crop for crop in crops if Rect(crop[1][1], crop[1][0], crop[0].shape[1], crop[0].shape[0]).
             intersection(r).area() > 0] for r in rois]
-        # crops = [crops[i * project_size:i * project_size + project_size]
-        #          for i in range(math.ceil(len(crops) / project_size))]
         return crops
     else:
         return []
@@ -168,40 +185,50 @@ def create_non_overlapping_crops(image, mask, crop_size):
     return list(zip(crops, crop_coords, masks))
 
 
-def main(predictions, output_dir, input_dir, select_roi, false_positive, crop_size):
-    with open(predictions, 'rb') as f:
-        predictions = pickle.load(f)
-        os.makedirs(output_dir, exist_ok=True)
-        for full_scan, mask in predictions.items():
-            suffix = file_without_ext(full_scan)
-            original_file_name = os.path.join(input_dir, full_scan)
-            original = cv2.imread(original_file_name)
-            full_image = create_annotated_scan(original, mask, output_dir, suffix)
-            eq_func = get_eq_func([original])
+def main(output_dir, input_dir, slice, select_roi, false_positive, crop_size):
+    results = [f for f in listdir(input_dir) if isfile(join(input_dir, f))]
+    results = {'-'.join(f.split('-')[:2]) for f in results if slice is None or f.split('-')[1] == slice}
+    results = sorted(list(results))
 
-            crops = create_non_overlapping_crops(original, mask, crop_size)
+    os.makedirs(output_dir, exist_ok=True)
+    for suffix in results:
+        original_file_name = os.path.join(input_dir, suffix+'-original.jpg')
+        mask_file_name = os.path.join(input_dir, suffix+'-cellmask.png')
+        if not isfile(original_file_name):
+            continue
+        print(f"Processing {original_file_name}")
+        original = cv2.cvtColor(cv2.imread(original_file_name, cv2.IMREAD_GRAYSCALE), cv2.COLOR_GRAY2BGR)
+        mask = cv2.imread(mask_file_name, cv2.IMREAD_GRAYSCALE)
+        ctrs, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        mask = np.zeros_like(mask)
+        cv2.fillPoly(mask, ctrs, color=255)
+        mask = mask.astype(bool)
+        eq_func = get_eq_func([original])
 
-            if select_roi:
-                crops = create_rois_list(crops, full_image)
-                for num, crop in enumerate(crops):
-                    build_project(crop, f'{output_dir}/{suffix}/simple/{num}', lambda c: c, suffix, false_positive)
-                    build_project(crop, f'{output_dir}/{suffix}/augmented/{num}', lambda c: concat_eq(c, eq_func),
-                                  suffix, false_positive)
-            else:
-                crops = group_by_rows(crops)
-                for crop in crops:
-                    build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix,
-                                  False)
-                    build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}',
-                                  lambda c: concat_eq(c, eq_func), suffix, False)
+        crops = create_non_overlapping_crops(original, mask, crop_size)
+        full_image = create_annotated_scan(original, mask, output_dir, suffix)
+
+        if select_roi:
+            crops = create_rois_list(suffix, crops, full_image)
+            for num, crop in enumerate(crops):
+                build_project(crop, f'{output_dir}/{suffix}/simple/{num}', lambda c: c, suffix, false_positive)
+                build_project(crop, f'{output_dir}/{suffix}/augmented/{num}', lambda c: concat_eq(c, eq_func),
+                              suffix, false_positive)
+        else:
+            crops = group_by_rows(crops)
+            for crop in crops:
+                build_project(crop, f'{output_dir}/{suffix}/simple/{crop[0][1][0]}', lambda c: c, suffix,
+                              False)
+                build_project(crop, f'{output_dir}/{suffix}/augmented/{crop[0][1][0]}',
+                              lambda c: concat_eq(c, eq_func), suffix, False)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Detectron Mask R-CNN for cells segmentation - parse predictions')
     parser.add_argument('--input_dir', required=True, action='store', help='Directory containing full scan files')
+    parser.add_argument('--slice', default=None, action='store', help='Directory containing full scan files')
     parser.add_argument('--output_dir', required=True, action='store', help='Directory to output the predicted results')
-    parser.add_argument('--predictions', required=True, action='store', help='Predictions pickle')
     parser.add_argument('--crop_size', default=312, type=int, action='store', help='Size of a single crop')
     parser.add_argument('--select_roi', action='store_true', help='Manually select ROIs')
     parser.add_argument('--false_positive', action='store_true', help='Manually select ROIs')

@@ -1,13 +1,11 @@
 import json
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-from rect import Rect
-
 
 import cv2
+import numpy as np
 
 from process_predicted_crops import create_file_entry
+from rect import Rect
 
 input_dir = 'scan_thumbnails'
 output_dir = 'data/train_hippo'
@@ -30,7 +28,7 @@ for entry in entries.values():
     image = cv2.equalizeHist(image)
     image = image * mask
     ret, thresh = cv2.threshold(image, 80, 255, 0)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = [c.squeeze() for c in contours if c.shape[0] > 1 and cv2.boundingRect(c)[3] > 50]
     pattern = np.zeros_like(image)
     cv2.fillPoly(pattern, contours, color=1)
@@ -42,13 +40,10 @@ for entry in entries.values():
             break
         pattern[roi.y: roi.y + roi.h, roi.x: roi.x + roi.w] = 0
 
-    contours, _ = cv2.findContours(pattern, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(pattern, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = [c.squeeze() for c in contours if c.shape[0] > 1 and cv2.boundingRect(c)[3] > 50]
     new_entries[f'{entry["filename"]}{entry["size"]}'] = create_file_entry(f'{output_dir}/{entry["filename"]}',
                                                                            contours)
 
 project['_via_img_metadata'] = new_entries
 json.dump(project, open(f'{output_dir}/annotations.json', 'wt'))
-
-{597007858:range(67, 72), 602828622: range(68, 72), 606570335: range(68,72), 613898292: range(67, 71),
-614738437: range(68, 72), 627869431: range(67, 72), 653191449: range(65, 70)}

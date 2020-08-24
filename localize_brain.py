@@ -26,9 +26,14 @@ def detect_brain(image):
     return mask, Rect(*cv2.boundingRect(ctrs)), ctrs
 
 
-image = cv2.imread('output/experiments/cache/129564675/65-thumbnail.jpg', cv2.IMREAD_GRAYSCALE)
-brain, bbox, poly = detect_brain(image)
-# cv2.rectangle(brain, *bbox.corners(), color=255)
-plt.imshow(brain, cmap='gray')
-plt.show()
-print(Polygon(poly.tolist()).area)
+def main():
+    image = cv2.imread('output/experiments/cache/129564675/65-thumbnail.jpg', cv2.IMREAD_GRAYSCALE)
+    brain, bbox, poly = detect_brain(image)
+    # cv2.rectangle(brain, *bbox.corners(), color=255)
+    plt.imshow(brain, cmap='gray')
+    plt.show()
+    print(Polygon(poly.tolist()).area)
+
+
+if __name__ == '__main__':
+    main()

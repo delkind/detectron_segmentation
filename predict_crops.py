@@ -12,45 +12,12 @@ from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 from detectron2.utils.visualizer import GenericMask
 
+from predict_experiment import initialize_model, create_crops_list
+
 
 def split_image(image_path, crop_size, border_size):
     image = cv2.imread(image_path, cv2.IMREAD_COLOR)
     return create_crops_list(border_size, crop_size, image), image
-
-
-def create_crops_list(border_size, crop_size, image):
-    crop_coords = create_crops_coords_list(crop_size, border_size, image)
-    crops = [image[i:i + crop_size, j:j + crop_size, ...] for (i, j) in crop_coords]
-    return list(zip(crops, crop_coords))
-
-
-def create_crops_coords_list(crop_size, border_size, image):
-    vert = list(range(0, image.shape[0], crop_size - 2 * border_size))
-    horiz = list(range(0, image.shape[1], crop_size - 2 * border_size))
-    vert = list(filter(lambda v: v + crop_size <= image.shape[0], vert)) + [image.shape[0] - crop_size]
-    horiz = list(filter(lambda v: v + crop_size <= image.shape[1], horiz)) + [image.shape[1] - crop_size]
-    crop_coords = list(itertools.product(vert, horiz))
-    return crop_coords
-
-
-def initialize_model(model_name, device, threshold):
-    cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
-    cfg.DATASETS.TRAIN = ("balloon_train",)
-    cfg.DATASETS.TEST = ()
-    cfg.DATALOADER.NUM_WORKERS = 2
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
-        "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
-    cfg.SOLVER.IMS_PER_BATCH = 2
-    cfg.SOLVER.BASE_LR = 0.00025  # pick a good LR
-    cfg.SOLVER.MAX_ITER = 1  # 300 iterations seems good enough for this toy dataset; you may need to train longer for a practical dataset
-    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 512  # faster, and good enough for this toy dataset (default: 512)
-    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1  # only has one class (ballon)
-    cfg.MODEL.DEVICE = device
-    cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, model_name)
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = threshold  # set the testing threshold for this model
-    cfg.DATASETS.TEST = ("balloon_val",)
-    return DefaultPredictor(cfg)
 
 
 def predict(fs, crop, coords, predictor):

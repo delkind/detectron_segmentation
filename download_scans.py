@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import urllib.request
 from collections import defaultdict
 
 import cv2
@@ -35,8 +36,6 @@ for experiment_id, infos in experiments.items():
     images = {s['section_number']: s for s in image_api.section_image_query(experiment_id)}
     for info in infos:
         img = images[info["slice_id"]]
-        thumb_path = os.path.join(input_dir, info['filename'])
-        thumb = cv2.imread(thumb_path)
         y = int(info["shape"]["y"]) // 4
         x = int(info["shape"]["x"]) // 4
         width = int(info["shape"]["width"]) // 4
@@ -46,7 +45,6 @@ for experiment_id, infos in experiments.items():
         url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={img["path"]}&zoom={zoom_factor}&'\
               f'top={y*2**8}&left={x*2**8}&width={width*2**zoom_factor}&'\
               f'height={height*2**zoom_factor}&filter=range&filterVals=0,1051,0,0,0,0'
-        image = cv2.cvtColor(io.imread(url), cv2.COLOR_RGB2BGR)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
+        urllib.request.urlretrieve(url, f'{output_dir}/{experiment_id}-{img["section_number"]}.jpg')
+        image = cv2.imread(f'{output_dir}/{experiment_id}-{img["section_number"]}.jpg', cv2.IMREAD_GRAYSCALE)
         cv2.imwrite(f'{output_dir}/{experiment_id}-{img["section_number"]}.jpg', image)

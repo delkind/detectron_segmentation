@@ -253,13 +253,18 @@ def get_all_experiments(output_dir):
     mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
                                  resolution=MouseConnectivityApi.VOXEL_RESOLUTION_100_MICRONS)
     experiments = mcc.get_experiments(dataframe=False)
-    new_children = get_hippocampal_struct_ids(mcc)
-    experiments = [e['id'] for e in experiments if not new_children.issuperset(e['injection_structures'])]
+    return experiments, mcc
+
+
+def get_relevant_experiment_ids(output_dir):
+    experiments, mcc = get_all_experiments(output_dir)
+    hippocampal_structs = get_hippocampal_struct_ids(mcc)
+    experiments = [e['id'] for e in experiments if not hippocampal_structs.issuperset(e['injection_structures'])]
     return experiments
 
 
 def sample_experiments(experiments_count, output_dir):
-    experiments = get_all_experiments(output_dir)
+    experiments = get_relevant_experiment_ids(output_dir)
     blacklist = get_downloaded_experiments(output_dir)
     return random.sample(list(filter(lambda i: i not in blacklist, experiments)), experiments_count)
 
