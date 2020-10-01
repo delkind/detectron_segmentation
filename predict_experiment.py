@@ -187,7 +187,7 @@ def predict_cells(border_size, cell_predictor, crop_size, experiment_id, image, 
 
 
 def obtain_full_scan(bbox, cache_dir, images, mask, section, padding):
-    x1, y1, x2, y2 = bbox
+    (x1, y1), (x2, y2) = bbox.corners()
     bbox = [x1 - padding, y1 - padding, x2 + padding, y2 + padding]
     hippo_mask = cv2.resize(mask[y1:y2, x1:x2].astype(np.uint8), (0, 0), fx=64, fy=64,
                             interpolation=cv2.INTER_CUBIC).astype(bool)
@@ -242,7 +242,7 @@ image_api = ImageDownloadApi()
 
 
 def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size, experiment_id,
-                       hippo_predictor, max_btm, max_section, min_btm, min_section, step, output_dir, save_mask,
+                       max_section, min_section, step, output_dir, save_mask,
                        bbox_padding, resume):
     print(f'Processing experiment {experiment_id}...')
     images = image_api.section_image_query(experiment_id)
@@ -269,11 +269,9 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
                                   save_mask)
 
 
-def main(experiment_ids, sections, hippo_predictor,
-         cell_predictor, min_btm, max_btm, crop_size, border_size,
+def main(experiment_ids, sections, cell_predictor, crop_size, border_size,
          output_dir, cache=False, bbox_padding=0, device='cuda',
          threshold=0.5, save_mask=False):
-    hippo_predictor = initialize_model(hippo_predictor, device, 0.5)
     if cell_predictor is not None:
         cell_predictor = initialize_model(cell_predictor, device, threshold)
     resume = False
@@ -307,7 +305,7 @@ def main(experiment_ids, sections, hippo_predictor,
         predict_experiment(
             lambda t, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
             border_size, cache, cell_predictor, crop_size,
-            int(experiment_id), hippo_predictor, max_btm, max_section, min_btm, min_section, step,
+            int(experiment_id), max_section, min_section, step,
             output_dir, save_mask, bbox_padding, resume)
 
 
@@ -326,14 +324,9 @@ if __name__ == '__main__':
         description='Detectron Mask R-CNN for cells segmentation - experiment prediction')
     parser.add_argument('--experiment_ids', '-e', required=True, action='store', help='Experiment ID')
     parser.add_argument('--cell_predictor', '-c', default=None, action='store', help='Cell model path')
-    parser.add_argument('--hippo_predictor', '-p', required=True, action='store', help='Hippocampus model path')
     parser.add_argument('--output_dir', '-o', required=True, action='store', help='Directory that will contain output')
 
     parser.add_argument('--sections', default="30,130,10", action='store', help='Section numbers to analyze as <min>,<max>[,<step>]')
-    parser.add_argument('--min_btm', default=5.5, type=float, action='store',
-                        help='Minimum box-to-mask ratio to analyze')
-    parser.add_argument('--max_btm', default=13.6, type=float, action='store',
-                        help='Maximum box-to-mask ratio to analyze')
     parser.add_argument('--bbox_padding', default=0, action='store',
                         help='Padding (in pixels) for the hippocampus bounding box')
     parser.add_argument('--cache', default=False, action='store_true', help='Cache the downloaded crops')
