@@ -14,6 +14,8 @@ from detectron2.model_zoo import model_zoo
 from detectron2.utils.visualizer import GenericMask
 from tqdm import tqdm
 
+from localize_brain import detect_brain
+
 
 def download_url(url, decription=None, filename=None):
     class DownloadProgressBar(tqdm):
@@ -47,21 +49,6 @@ def extract_predictions(predictions):
 
     polygons = [poly.reshape(-1, 2) for mask in masks for poly in mask.polygons]
     return polygons, mask
-
-
-def predict_hippo(image, predictor):
-    if len(image.shape) > 2 and image.shape[2] > 1:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    outputs = predictor(cv2.cvtColor(image, cv2.COLOR_GRAY2BGR))
-    polygons, mask = extract_predictions(outputs["instances"].to("cpu"))
-    if polygons is None or mask is None:
-        return None, None, None
-    boxes = [cv2.boundingRect(p) for p in polygons]
-    boxes = [[x, y, x + w, y + h] for x, y, w, h in boxes]
-    zipped = list(zip(*boxes))
-    xl, yl, xr, yr = zipped
-    bbox = [min(xl), min(yl), max(xr), max(yr)]
-    return polygons, bbox, mask
 
 
 def create_file_name(cache_dir, image_desc, suffix, box=None):
@@ -106,17 +93,7 @@ def download_section_image(image_path, zoom, description, box=None, filename=Non
     return image
 
 
-def calculate_areas(image, mask, bbox):
-    mask_area = mask.sum()
-    bbox_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-    total_area = image.shape[1] * image.shape[0]
-    cbox = (bbox_area * 10000 // total_area) / 10000
-    cmask = (mask_area * 10000 // bbox_area) / 10000
-    btm = (cmask * 10000 // cbox) / 10000
-    return cbox, cmask, btm
-
-
-def annotate_thumbnail(experiment, section, image, bbox, polygons, cbox, cmask, btm):
+def annotate_thumbnail(experiment, section, image, bbox, polygons):
     def put_text(text, bottom):
         textsize = cv2.getTextSize(text, font, font_scale, thickness)[0]
         text_x = (image.shape[1] - textsize[0]) // 2
@@ -132,31 +109,19 @@ def annotate_thumbnail(experiment, section, image, bbox, polygons, cbox, cmask, 
     font_scale = 0.5
     thickness = 1
     put_text(f'Experiment {experiment}, section {section}', False)
-    put_text(f'bbox coverage: {cbox}, mask coverage: {cmask}, btm: {btm}', True)
-    cv2.rectangle(image, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color=(0, 255, 0), thickness=1)
+    cv2.rectangle(image, *bbox.corners(), color=(0, 255, 0), thickness=1)
     cv2.polylines(image, polygons, isClosed=True, thickness=1, color=(0, 255, 0))
     return image
 
 
-def process_thumbnail(annotated_thumbnail_callback, btm_range, experiment_id, hippo_predictor, images, section,
-                      cache_dir):
-    proceed = False
+def process_thumbnail(annotated_thumbnail_callback, experiment_id, images, section, cache_dir):
     thumbnail = download_thumbnail(images[section], cache_dir)
-    polygons, bbox, mask = predict_hippo(thumbnail, hippo_predictor)
+    mask, bbox, polygons = detect_brain(cv2.cvtColor(thumbnail, cv2.COLOR_BGR2GRAY))
     if polygons is not None:
-        cbox, cmask, btm = calculate_areas(thumbnail, mask, bbox)
-        if btm_range[0] <= btm <= btm_range[1]:
-            xl, yl, xr, yr = bbox
-            bbox = [xl - 5, yl - 5, xr + 5, yr + 5]
-            proceed = True
         if annotated_thumbnail_callback is not None:
-            thumbnail = annotate_thumbnail(experiment_id, section, thumbnail, bbox, polygons, cbox, cmask, btm)
-            annotated_thumbnail_callback(thumbnail, proceed, section)
-        else:
-            print(f"Skipping section {section}: BTM is not in range")
-    else:
-        print(f"Skipping section {section}: no hippocampus found")
-    return proceed, bbox, mask
+            thumbnail = annotate_thumbnail(experiment_id, section, thumbnail, bbox, polygons)
+            annotated_thumbnail_callback(thumbnail, section)
+    return bbox, mask
 
 
 def plot_thumbnail(thumbnail):
@@ -277,8 +242,8 @@ image_api = ImageDownloadApi()
 
 
 def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_predictor, crop_size, experiment_id,
-                       hippo_predictor, max_btm, max_section, min_btm, min_section, output_dir, save_mask, bbox_padding,
-                       resume):
+                       hippo_predictor, max_btm, max_section, min_btm, min_section, step, output_dir, save_mask,
+                       bbox_padding, resume):
     print(f'Processing experiment {experiment_id}...')
     images = image_api.section_image_query(experiment_id)
     images = {i['section_number']: i for i in images}
@@ -289,25 +254,22 @@ def predict_experiment(annotated_thumbnail_callback, border_size, cache, cell_pr
         cache_dir = None
     output_dir = f'{output_dir}/{experiment_id}'
     os.makedirs(output_dir, exist_ok=True)
-    for section_num, section in enumerate(range(min_section, max_section + 1)):
-        proceed, bbox, mask = process_thumbnail(annotated_thumbnail_callback, (min_btm, max_btm),
-                                                experiment_id, hippo_predictor,
-                                                images, section, cache_dir)
-        if proceed:
-            if resume and os.path.isfile(f'{output_dir}/{experiment_id}-{section}-annotated.jpg'):
-                print(f"Skipping {experiment_id}-{section}, already processed")
+    for section_num, section in enumerate(range(min_section, max_section + 1, step)):
+        bbox, mask = process_thumbnail(annotated_thumbnail_callback, experiment_id, images, section, cache_dir)
+        if resume and os.path.isfile(f'{output_dir}/{experiment_id}-{section}-annotated.jpg'):
+            print(f"Skipping {experiment_id}-{section}, already processed")
+        else:
+            hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section, bbox_padding)
+            if cell_predictor is not None:
+                cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, image, section)
             else:
-                hippo_mask, image = obtain_full_scan(bbox, cache_dir, images, mask, section, bbox_padding)
-                if cell_predictor is not None:
-                    cell_mask = predict_cells(border_size, cell_predictor, crop_size, experiment_id, image, section)
-                else:
-                    cell_mask = None
+                cell_mask = None
 
-                create_annotated_scan(image, cell_mask, hippo_mask, f'{output_dir}/{experiment_id}-{section}',
-                                      save_mask)
+            create_annotated_scan(image, cell_mask, hippo_mask, f'{output_dir}/{experiment_id}-{section}',
+                                  save_mask)
 
 
-def main(experiment_ids, min_section, max_section, hippo_predictor,
+def main(experiment_ids, sections, hippo_predictor,
          cell_predictor, min_btm, max_btm, crop_size, border_size,
          output_dir, cache=False, bbox_padding=0, device='cuda',
          threshold=0.5, save_mask=False):
@@ -329,11 +291,23 @@ def main(experiment_ids, min_section, max_section, hippo_predictor,
     else:
         experiment_ids = experiment_ids.split(',')
 
+    sections = sections.split(',')
+    if len(sections) < 2:
+        raise Exception("Error: sections aren't defined properly")
+
+    if len(sections) == 2:
+        step = 1
+    else:
+        step = int(sections[2])
+
+    min_section = int(sections[0])
+    max_section = int(sections[1])
+
     for experiment_id in sorted(experiment_ids):
         predict_experiment(
-            lambda t, p, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
+            lambda t, s: cv2.imwrite(f'{output_dir}/{experiment_id}/{experiment_id}-{s}-thumb.jpg', t),
             border_size, cache, cell_predictor, crop_size,
-            int(experiment_id), hippo_predictor, max_btm, max_section, min_btm, min_section,
+            int(experiment_id), hippo_predictor, max_btm, max_section, min_btm, min_section, step,
             output_dir, save_mask, bbox_padding, resume)
 
 
@@ -355,8 +329,7 @@ if __name__ == '__main__':
     parser.add_argument('--hippo_predictor', '-p', required=True, action='store', help='Hippocampus model path')
     parser.add_argument('--output_dir', '-o', required=True, action='store', help='Directory that will contain output')
 
-    parser.add_argument('--min_section', default=63, type=int, action='store', help='Minimum section number to analyze')
-    parser.add_argument('--max_section', default=83, type=int, action='store', help='Maximum section number to analyze')
+    parser.add_argument('--sections', default="30,130,10", action='store', help='Section numbers to analyze as <min>,<max>[,<step>]')
     parser.add_argument('--min_btm', default=5.5, type=float, action='store',
                         help='Minimum box-to-mask ratio to analyze')
     parser.add_argument('--max_btm', default=13.6, type=float, action='store',
