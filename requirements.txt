@@ -45,3 +45,6 @@ scikit-image~=0.17.2
 detectron2~=0.1
 allensdk~=2.1.0
 Shapely~=1.7.0
+pandas~=0.25.3
+SimpleITK~=1.2.4
+scipy~=1.5.2
