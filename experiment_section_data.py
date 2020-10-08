@@ -39,7 +39,7 @@ class ExperimentSectionData(object):
         temp = sitk.ReadImage(f'{self.output_dir}/dfmfld.mhd', sitk.sitkVectorFloat64)
         dfmfld_transform = sitk.DisplacementFieldTransform(temp)
 
-        temp = self.mcc.get_affine_parameters(self.id, direction='trv')
+        temp = self.mcc.get_affine_parameters(self.id, direction='trv', file_name=f'{self.output_dir}/aff_param.txt')
         aff_trans = sitk.AffineTransform(3)
         aff_trans.SetParameters(temp.flatten())
 
@@ -48,6 +48,7 @@ class ExperimentSectionData(object):
         self.transform.AddTransform(dfmfld_transform)
         os.remove(f'{self.output_dir}/dfmfld.mhd')
         os.remove(f'{self.output_dir}/dfmfld.raw')
+        os.remove(f'{self.output_dir}/aff_param.txt')
 
     def __init_transformed_points__(self):
         self.transformed_points = self.__transform_points__(self.transform, self.root_points.astype(float) *
@@ -120,8 +121,8 @@ def process_experiment_list(params):
 def main(output_dir, resolution):
     mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
                                  resolution=resolution)
-    anno, meta = mcc.get_annotation_volume()
-    rsp = mcc.get_reference_space()
+    mcc.get_annotation_volume()
+    mcc.get_reference_space()
     experiments = mcc.get_experiments(dataframe=False)
 
     print(f"Detected {os.cpu_count()} CPUs")
