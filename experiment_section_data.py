@@ -1,6 +1,6 @@
 import argparse
 import os
-from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import Pool
 
 import SimpleITK as sitk
 import cv2
@@ -128,7 +128,7 @@ def main(output_dir, resolution):
     exp_lists = np.array_split(experiments, os.cpu_count())
 
     exp_lists = [(output_dir, resolution, el.tolist()) for el in exp_lists]
-    pool = ThreadPool(os.cpu_count())
+    pool = Pool(os.cpu_count())
     list(pool.map(process_experiment_list, exp_lists))
 
 
