@@ -11,7 +11,7 @@ from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
 
 class ExperimentSectionData(object):
-    def __init__(self, mcc, experiment_id, output_dir, anno, meta, rsp, zoom=8):
+    def __init__(self, mcc, experiment_id, output_dir, anno, meta, rsp, zoom=8, remove_transform_data=True):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         self.mcc = mcc
@@ -29,11 +29,11 @@ class ExperimentSectionData(object):
                      self.details[0]['sub_images'][0]['width'] // (2 ** self.zoom))
         self.root_points = np.array(np.where(self.anno != 0)).T
         print(f"Initializing displacement transform data for {self.id}...")
-        self.__init_transform__()
+        self.__init_transform__(remove_transform_data)
         print(f"Performing displacement transformation for {self.id}...")
         self.__init_transformed_points__()
 
-    def __init_transform__(self):
+    def __init_transform__(self, remove_data):
         self.mcc.get_deformation_field(self.id, header_path=f'{self.output_dir}/dfmfld.mhd',
                                        voxel_path=f'{self.output_dir}/dfmfld.raw')
         temp = sitk.ReadImage(f'{self.output_dir}/dfmfld.mhd', sitk.sitkVectorFloat64)
@@ -46,9 +46,11 @@ class ExperimentSectionData(object):
         self.transform = sitk.Transform(3, sitk.sitkComposite)
         self.transform.AddTransform(aff_trans)
         self.transform.AddTransform(dfmfld_transform)
-        os.remove(f'{self.output_dir}/dfmfld.mhd')
-        os.remove(f'{self.output_dir}/dfmfld.raw')
-        os.remove(f'{self.output_dir}/aff_param.txt')
+
+        if remove_data:
+            os.remove(f'{self.output_dir}/dfmfld.mhd')
+            os.remove(f'{self.output_dir}/dfmfld.raw')
+            os.remove(f'{self.output_dir}/aff_param.txt')
 
     def __init_transformed_points__(self):
         self.transformed_points = self.__transform_points__(self.transform, self.root_points.astype(float) *
@@ -94,17 +96,18 @@ class ExperimentSectionData(object):
 
         new_result = np.zeros_like(result)
 
+        print(f"Filling holes for {self.id}...")
         for i, struct in enumerate(structures):
-            print(f"Filling holes for {self.id}: {i}/{len(structures)}...")
             mask = result == struct
             mask = ndi.binary_closing(ndi.binary_fill_holes(mask).astype(np.int32)).astype(np.int32)
             new_result[mask != 0] = struct
 
+        print(f"Saving segmentation data for {self.id}...")
         np.savez_compressed(f"{self.output_dir}/{self.id}-sections", new_result)
 
 
 def process_experiment_list(params):
-    output_dir, resolution, exp_list = params
+    output_dir, resolution, exp_list, remove_transform_data, zoom = params
     mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
                                  resolution=resolution)
     anno, meta = mcc.get_annotation_volume()
@@ -114,11 +117,11 @@ def process_experiment_list(params):
     for experiment in exp_list:
         experiment_id = experiment['id']
         experiment = ExperimentSectionData(mcc, experiment_id, f'{output_dir}/{experiment_id}/', anno, meta, rsp,
-                                           zoom=2)
+                                           zoom=zoom, remove_transform_data=remove_transform_data)
         experiment.create_section_data()
 
 
-def main(output_dir, resolution):
+def main(output_dir, resolution, retain_transform_data, zoom):
     mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
                                  resolution=resolution)
     mcc.get_annotation_volume()
@@ -128,7 +131,7 @@ def main(output_dir, resolution):
     print(f"Detected {os.cpu_count()} CPUs")
     exp_lists = np.array_split(experiments, os.cpu_count())
 
-    exp_lists = [(output_dir, resolution, el.tolist()) for el in exp_lists]
+    exp_lists = [(output_dir, resolution, el.tolist(), not retain_transform_data, zoom) for el in exp_lists]
     pool = Pool(os.cpu_count())
     list(pool.map(process_experiment_list, exp_lists))
 
@@ -138,6 +141,9 @@ if __name__ == '__main__':
         description='Build segmentation data for Mouse Connectivity')
     parser.add_argument('--output_dir', '-o', required=True, action='store', help='Directory that will contain output')
     parser.add_argument('--resolution', '-r', default=25, type=int, action='store', help='Reference space resolution')
+    parser.add_argument('--zoom', '-z', default=2, type=int, action='store', help='Image zoom')
+    parser.add_argument('--retain_transform_data', '-t', action='store_true', default=False,
+                        help='Retain the transform data')
     args = parser.parse_args()
 
     print(vars(args))
