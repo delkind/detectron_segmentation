@@ -121,7 +121,7 @@ def process_experiment_list(params):
         experiment.create_section_data()
 
 
-def main(output_dir, resolution, retain_transform_data, zoom):
+def main(output_dir, resolution, retain_transform_data, zoom, parallel_threads):
     mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
                                  resolution=resolution)
     mcc.get_annotation_volume()
@@ -129,10 +129,10 @@ def main(output_dir, resolution, retain_transform_data, zoom):
     experiments = mcc.get_experiments(dataframe=False)
 
     print(f"Detected {os.cpu_count()} CPUs")
-    exp_lists = np.array_split(experiments, os.cpu_count())
+    exp_lists = np.array_split(experiments, parallel_threads)
 
     exp_lists = [(output_dir, resolution, el.tolist(), not retain_transform_data, zoom) for el in exp_lists]
-    pool = Pool(os.cpu_count())
+    pool = Pool(parallel_threads)
     list(pool.map(process_experiment_list, exp_lists))
 
 
@@ -143,6 +143,8 @@ if __name__ == '__main__':
     parser.add_argument('--resolution', '-r', default=25, type=int, action='store', help='Reference space resolution')
     parser.add_argument('--zoom', '-z', default=2, type=int, action='store', help='Image zoom')
     parser.add_argument('--retain_transform_data', '-t', action='store_true', default=False,
+                        help='Retain the transform data')
+    parser.add_argument('--parallel_threads', '-p', action='store', default=os.cpu_count(),
                         help='Retain the transform data')
     args = parser.parse_args()
 
