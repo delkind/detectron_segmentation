@@ -144,7 +144,7 @@ if __name__ == '__main__':
     parser.add_argument('--zoom', '-z', default=2, type=int, action='store', help='Image zoom')
     parser.add_argument('--retain_transform_data', '-t', action='store_true', default=False,
                         help='Retain the transform data')
-    parser.add_argument('--parallel_threads', '-p', action='store', default=os.cpu_count(),
+    parser.add_argument('--parallel_threads', '-p', action='store', type=int, default=os.cpu_count(),
                         help='Retain the transform data')
     args = parser.parse_args()
 
