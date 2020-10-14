@@ -1,5 +1,6 @@
 import argparse
 import os
+import subprocess
 from multiprocessing.pool import Pool
 
 import SimpleITK as sitk
@@ -68,7 +69,7 @@ class ExperimentSectionData(object):
 
     @staticmethod
     def fill_holes(source):
-        ret, thresh = cv2.threshold(source.astype(np.uint8)*50, 5, 255, cv2.THRESH_BINARY)
+        ret, thresh = cv2.threshold(source.astype(np.uint8) * 50, 5, 255, cv2.THRESH_BINARY)
         ctrs, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         mask = np.zeros_like(source, dtype=np.uint8)
         cv2.fillPoly(mask, ctrs, color=255)
@@ -91,7 +92,8 @@ class ExperimentSectionData(object):
 
         structures = np.unique(result).tolist()
         structures = list(set(structures).difference({0}))
-        sorted_indx = np.argsort(np.array(list(map(lambda x: len(x), self.rsp.structure_tree.ancestor_ids(structures)))))
+        sorted_indx = np.argsort(
+            np.array(list(map(lambda x: len(x), self.rsp.structure_tree.ancestor_ids(structures)))))
         structures = np.array(structures)[sorted_indx].tolist()
 
         new_result = np.zeros_like(result)
@@ -106,34 +108,30 @@ class ExperimentSectionData(object):
         np.savez_compressed(f"{self.output_dir}/{self.id}-sections", new_result)
 
 
-def process_experiment_list(params):
-    output_dir, resolution, exp_list, remove_transform_data, zoom = params
-    mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
+def main(output_dir, resolution, retain_transform_data, zoom, parallel_threads, number):
+    mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/{number}/connectivity/mouse_connectivity_manifest.json',
                                  resolution=resolution)
-    anno, meta = mcc.get_annotation_volume()
-    rsp = mcc.get_reference_space()
-    rsp.remove_unassigned()  # This removes ids that are not in this particular reference space
+    experiments = sorted(mcc.get_experiments(dataframe=False), key=lambda e: e['id'])
 
-    for experiment in exp_list:
-        experiment_id = experiment['id']
-        experiment = ExperimentSectionData(mcc, experiment_id, f'{output_dir}/{experiment_id}/', anno, meta, rsp,
-                                           zoom=zoom, remove_transform_data=remove_transform_data)
-        experiment.create_section_data()
-
-
-def main(output_dir, resolution, retain_transform_data, zoom, parallel_threads):
-    mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
-                                 resolution=resolution)
-    mcc.get_annotation_volume()
-    mcc.get_reference_space()
-    experiments = mcc.get_experiments(dataframe=False)
-
-    print(f"Detected {os.cpu_count()} CPUs")
-    exp_lists = np.array_split(experiments, parallel_threads)
-
-    exp_lists = [(output_dir, resolution, el.tolist(), not retain_transform_data, zoom) for el in exp_lists]
-    pool = Pool(parallel_threads)
-    list(pool.map(process_experiment_list, exp_lists))
+    if number is None:
+        processes = [subprocess.Popen(["python",
+                                       "./experiment_section_data.py",
+                                       f"-o {output_dir}", f"-r {resolution}",
+                                       f"-z {zoom}"
+                                       ] +
+                                      (["-t"] if retain_transform_data else []) +
+                                      [f"-p {parallel_threads}", f"-n {i}"])
+                     for i in range(parallel_threads)]
+        exit_codes = [p.wait() for p in processes]
+    else:
+        anno, meta = mcc.get_annotation_volume()
+        rsp = mcc.get_reference_space()
+        rsp.remove_unassigned()  # This removes ids that are not in this particular reference space
+        for experiment in experiments[number::parallel_threads]:
+            experiment_id = experiment['id']
+            experiment = ExperimentSectionData(mcc, experiment_id, f'{output_dir}/{experiment_id}/', anno, meta, rsp,
+                                               zoom=zoom, remove_transform_data=not retain_transform_data)
+            experiment.create_section_data()
 
 
 if __name__ == '__main__':
@@ -144,8 +142,10 @@ if __name__ == '__main__':
     parser.add_argument('--zoom', '-z', default=2, type=int, action='store', help='Image zoom')
     parser.add_argument('--retain_transform_data', '-t', action='store_true', default=False,
                         help='Retain the transform data')
-    parser.add_argument('--parallel_threads', '-p', action='store', type=int, default=os.cpu_count(),
-                        help='Retain the transform data')
+    parser.add_argument('--parallel_threads', '-p', action='store', type=int, required=True,
+                        help='Number of parallel threads')
+    parser.add_argument('--number', '-n', action='store', type=int, default=None,
+                        help='Number of this instance')
     args = parser.parse_args()
 
     print(vars(args))
