@@ -109,24 +109,24 @@ class ExperimentSectionData(object):
 
 
 def main(output_dir, resolution, retain_transform_data, zoom, parallel_threads, number):
-    mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/{number}/connectivity/mouse_connectivity_manifest.json',
+    mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
                                  resolution=resolution)
+    anno, meta = mcc.get_annotation_volume()
+    rsp = mcc.get_reference_space()
+    rsp.remove_unassigned()  # This removes ids that are not in this particular reference space
     experiments = sorted(mcc.get_experiments(dataframe=False), key=lambda e: e['id'])
 
     if number is None:
         processes = [subprocess.Popen(["python",
                                        "./experiment_section_data.py",
-                                       f"-o {output_dir}", f"-r {resolution}",
-                                       f"-z {zoom}"
+                                       f"-o{output_dir}", f"-r{resolution}",
+                                       f"-z{zoom}"
                                        ] +
                                       (["-t"] if retain_transform_data else []) +
-                                      [f"-p {parallel_threads}", f"-n {i}"])
+                                      [f"-p{parallel_threads}", f"-n{i}"])
                      for i in range(parallel_threads)]
         exit_codes = [p.wait() for p in processes]
     else:
-        anno, meta = mcc.get_annotation_volume()
-        rsp = mcc.get_reference_space()
-        rsp.remove_unassigned()  # This removes ids that are not in this particular reference space
         for experiment in experiments[number::parallel_threads]:
             experiment_id = experiment['id']
             experiment = ExperimentSectionData(mcc, experiment_id, f'{output_dir}/{experiment_id}/', anno, meta, rsp,
