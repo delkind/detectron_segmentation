@@ -37,7 +37,13 @@ class ExperimentSectionData(object):
     def __init_transform__(self, remove_data):
         self.mcc.get_deformation_field(self.id, header_path=f'{self.output_dir}/dfmfld.mhd',
                                        voxel_path=f'{self.output_dir}/dfmfld.raw')
-        temp = sitk.ReadImage(f'{self.output_dir}/dfmfld.mhd', sitk.sitkVectorFloat64)
+        temp = None
+        while temp is None:
+            try:
+                temp = sitk.ReadImage(f'{self.output_dir}/dfmfld.mhd', sitk.sitkVectorFloat64)
+            except RuntimeError:
+                temp = None
+
         dfmfld_transform = sitk.DisplacementFieldTransform(temp)
 
         temp = self.mcc.get_affine_parameters(self.id, direction='trv', file_name=f'{self.output_dir}/aff_param.txt')
