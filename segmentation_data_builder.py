@@ -111,6 +111,7 @@ class SegmentationDataBuilder(DirWatcher):
         self.rsp.remove_unassigned()  # This removes ids that are not in this particular reference space
 
     def process_item(self, item):
+        item = int(item)
         experiment = ExperimentSectionData(self.mcc, item, f'{self.output_dir}/proc/{item}/', self.anno, self.meta, self.rsp,
                                            self.logger, zoom=self.zoom,
                                            remove_transform_data=not self.retain_transform_data)
