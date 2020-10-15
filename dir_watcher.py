@@ -17,7 +17,7 @@ class DirWatcher(ABC):
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', "%a %Y-%m-%d %H:%M:%S")
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
-        for d in [intermediate_dir, results_dir]:
+        for d in [intermediate_dir, results_dir, error_dir]:
             os.makedirs(d, exist_ok=True)
 
     def extract_item(self):
