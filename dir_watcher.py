@@ -6,8 +6,7 @@ from abc import abstractmethod, ABC
 
 
 class DirWatcher(ABC):
-    def __init__(self, input_dir, intermediate_dir, results_dir, error_dir, name):
-        self.error_dir = error_dir
+    def __init__(self, input_dir, intermediate_dir, results_dir, name):
         self.results_dir = results_dir
         self.intermediate_dir = intermediate_dir
         self.input_dir = input_dir
@@ -17,7 +16,7 @@ class DirWatcher(ABC):
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', "%a %Y-%m-%d %H:%M:%S")
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
-        for d in [intermediate_dir, results_dir, error_dir]:
+        for d in [intermediate_dir, results_dir]:
             os.makedirs(d, exist_ok=True)
 
     def extract_item(self):
@@ -36,7 +35,7 @@ class DirWatcher(ABC):
         try:
             self.process_item(item)
         except Exception as e:
-            os.replace(os.path.join(self.intermediate_dir, item), os.path.join(self.error_dir, item))
+            os.replace(os.path.join(self.intermediate_dir, item), os.path.join(self.input_dir, item))
             raise e
 
         os.replace(os.path.join(self.intermediate_dir, item), os.path.join(self.results_dir, item))
