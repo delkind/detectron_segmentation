@@ -6,7 +6,8 @@ from abc import abstractmethod, ABC
 
 
 class DirWatcher(ABC):
-    def __init__(self, input_dir, intermediate_dir, results_dir, name):
+    def __init__(self, input_dir, intermediate_dir, results_dir, error_dir, name):
+        self.error_dir = error_dir
         self.results_dir = results_dir
         self.intermediate_dir = intermediate_dir
         self.input_dir = input_dir
@@ -32,8 +33,14 @@ class DirWatcher(ABC):
         return None
 
     def handle_item(self, item):
-        self.process_item(item)
+        try:
+            self.process_item(item)
+        except Exception as e:
+            os.replace(os.path.join(self.intermediate_dir, item), os.path.join(self.error_dir, item))
+            raise e
+
         os.replace(os.path.join(self.intermediate_dir, item), os.path.join(self.results_dir, item))
+
 
     def run_until_empty(self):
         while True:
@@ -50,10 +57,10 @@ class DirWatcher(ABC):
                 break
 
             item = self.extract_item()
-            if item is None:
-                time.sleep(1)
-            else:
+            if item is not None:
                 self.handle_item(item)
+            else:
+                time.sleep(1)
 
     @abstractmethod
     def process_item(self, item):

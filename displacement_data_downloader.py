@@ -8,7 +8,8 @@ from dir_watcher import DirWatcher
 
 class SegmentationDataDownloader(DirWatcher):
     def __init__(self, output_dir, number, resolution):
-        super().__init__(*[os.path.join(output_dir, d) for d in ['data/input', 'data/dl', 'data/ready']],
+        super().__init__(*[os.path.join(output_dir, d) for d in ['data/input', 'data/dl', 'data/ready',
+                                                                 'data/dl_error']],
                          f'downloader-{number}')
         self.mcc = MouseConnectivityCache(manifest_file=f'{output_dir}/connectivity/mouse_connectivity_manifest.json',
                                           resolution=resolution)

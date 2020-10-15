@@ -97,7 +97,8 @@ class ExperimentSectionData(object):
 
 class SegmentationDataBuilder(DirWatcher):
     def __init__(self, output_dir, resolution, retain_transform_data, zoom, number, count):
-        super().__init__(*[os.path.join(output_dir, d) for d in ['data/ready', 'data/proc', 'data/result']],
+        super().__init__(*[os.path.join(output_dir, d) for d in ['data/ready', 'data/proc', 'data/result',
+                                                                 'data/proc_error']],
                          f'downloader-{number}')
         self.count = count
         self.zoom = zoom
@@ -112,7 +113,7 @@ class SegmentationDataBuilder(DirWatcher):
 
     def process_item(self, item):
         item = int(item)
-        experiment = ExperimentSectionData(self.mcc, item, f'{self.output_dir}/proc/{item}/', self.anno, self.meta, self.rsp,
+        experiment = ExperimentSectionData(self.mcc, item, f'{self.output_dir}/data/proc/{item}/', self.anno, self.meta, self.rsp,
                                            self.logger, zoom=self.zoom,
                                            remove_transform_data=not self.retain_transform_data)
         experiment.create_section_data()
