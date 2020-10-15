@@ -40,7 +40,6 @@ class DirWatcher(ABC):
 
         os.replace(os.path.join(self.intermediate_dir, item), os.path.join(self.results_dir, item))
 
-
     def run_until_empty(self):
         while True:
             item = self.extract_item()

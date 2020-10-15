@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import subprocess
 
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
@@ -13,8 +14,15 @@ def main(output_dir, resolution, retain_transform_data, zoom, parallel_downloads
     experiments = [e['id'] for e in mcc.get_experiments(dataframe=False)]
     experiments = sorted(list(set(experiments)))
 
-    for e in experiments:
-        os.makedirs(f'{output_dir}/data/input/{e}')
+    try:
+        os.makedirs(f'{output_dir}/data/input')
+        for e in experiments:
+            os.makedirs(f'{output_dir}/data/input/{e}')
+    except FileExistsError:
+        for e in experiments:
+            if os.path.isdir(f'{output_dir}/data/input/{e}'):
+                shutil.rmtree(f'{output_dir}/data/input/{e}')
+                os.makedirs(f'{output_dir}/data/input/{e}')
 
     downloads = [subprocess.Popen(["python",
                                    "./displacement_data_downloader.py",
