@@ -27,7 +27,8 @@ def main(input_dir, output_dir, brain_seg_data_dir, structure_id, parallel_proce
                                    f"-b{brain_seg_data_dir}",
                                    f"-s{structure_id}",
                                    f"-n{i}",
-                                   ])
+                                   ] +
+                                  (['-t'] if verify_thumbnail else []))
                  for i in range(parallel_processors)]
     exit_codes = [p.wait() for p in processes]
 
