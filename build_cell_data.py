@@ -3,13 +3,19 @@ import os
 import re
 import subprocess
 
+import pandas
+
 
 def main(input_dir, output_dir, brain_seg_data_dir, structure_id, parallel_processors, verify_thumbnail):
+    items = sorted([item for item in os.listdir(input_dir)
+                    if os.path.isdir(os.path.join(input_dir, item))
+                    and bool(re.match('^\\d+$', item))])
+
+    if not items:
+        return
+
     try:
         os.makedirs(f'{output_dir}/input')
-        items = sorted([item for item in os.listdir(input_dir)
-                        if os.path.isdir(os.path.join(input_dir, item))
-                        and bool(re.match('^\\d+$', item))])
         for i in items:
             os.makedirs(f'{output_dir}/input/{i}')
     except FileExistsError:
@@ -24,6 +30,17 @@ def main(input_dir, output_dir, brain_seg_data_dir, structure_id, parallel_proce
                                    ])
                  for i in range(parallel_processors)]
     exit_codes = [p.wait() for p in processes]
+
+    df = None
+
+    for item in items:
+        csv = pandas.read_csv(f'{output_dir}/result/{item}/experiment_data.csv')
+        if df is None:
+            df = csv
+        else:
+            df.join(csv)
+
+    df.to_csv(f'{output_dir}/result/experiments_data.csv')
 
 
 def create_cell_build_argparser():

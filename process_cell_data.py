@@ -73,7 +73,9 @@ class ExperimentCellsProcessor(object):
 
         csv = pandas.DataFrame(section_data)
         csv.to_csv(f'{self.output_dir}/{self.id}-sectiondata.csv')
-        return {f: self.details[f] for f in self.experiment_fields_to_save}
+
+        csv = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
+        csv.to_csv(f'{self.output_dir}/experiment_data.csv', index=False)
 
     def get_cell_mask(self, section, offset_x, offset_y):
         cell_mask_file_name = os.path.join(self.input_dir, f'{self.id}-{section}-cellmask.png')
@@ -206,11 +208,7 @@ class CellProcessor(DirWatcher):
                                               self.experiments[item],
                                               self.verify_thumbnail,
                                               self.logger)
-        return experiment.process()
-
-    def reduce(self, results, output_dir):
-        csv = pandas.DataFrame(results)
-        csv.to_csv(f'{output_dir}/expdata.csv')
+        experiment.process()
 
 
 if __name__ == '__main__':

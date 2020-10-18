@@ -36,29 +36,22 @@ class DirWatcher(ABC):
                 continue
 
     def handle_item(self, item, directory):
-        retval = None
-
         try:
-            retval = self.process_item(item, directory)
+            self.process_item(item, directory)
         except Exception as e:
             self.on_process_error(item)
             raise e
 
         os.replace(os.path.join(self.__intermediate_dir__, item), os.path.join(self.__results_dir__, item))
-        return retval
 
     def run_until_empty(self):
-        res_list = list()
         while True:
             item, directory = self.extract_item()
             if item is None:
                 break
-            res_list.append(self.handle_item(item, directory))
-
-        self.reduce(res_list, self.__results_dir__)
+            self.handle_item(item, directory)
 
     def run_until_count(self, results_count):
-        res_list = list()
         while True:
             results = [result for result in os.listdir(self.__results_dir__)
                        if os.path.isdir(os.path.join(self.__results_dir__, result))]
@@ -67,11 +60,9 @@ class DirWatcher(ABC):
 
             item, directory = self.extract_item()
             if item is not None:
-                res_list.append(self.handle_item(item, directory))
+                self.handle_item(item, directory)
             else:
                 time.sleep(1)
-
-        self.reduce(res_list, self.__results_dir__)
 
     def run_until_stopped(self):
         while True:
@@ -86,7 +77,4 @@ class DirWatcher(ABC):
 
     @abstractmethod
     def process_item(self, item, directory):
-        pass
-
-    def reduce(self, results, output_dir):
         pass
