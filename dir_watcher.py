@@ -33,7 +33,6 @@ class DirWatcher(ABC):
                 os.replace(os.path.join(self.__input_dir__, item), directory)
                 return item, directory
             except OSError as e:
-                self.logger.error("Error extracting item", e)
                 continue
 
     def handle_item(self, item, directory):
