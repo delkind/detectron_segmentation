@@ -15,7 +15,7 @@ def main(input_dir, output_dir, brain_seg_data_dir, structure_id, parallel_proce
     except FileExistsError:
         pass
     processes = [subprocess.Popen(["python",
-                                   "./process_predicted_data.py",
+                                   "./process_cell_data.py",
                                    f"-i{input_dir}",
                                    f"-o{output_dir}",
                                    f"-b{brain_seg_data_dir}",
