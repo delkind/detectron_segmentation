@@ -4,7 +4,7 @@ import re
 import subprocess
 
 
-def main(input_dir, output_dir, brain_seg_data_dir, structure_id, parallel_processors):
+def main(input_dir, output_dir, brain_seg_data_dir, structure_id, parallel_processors, verify_thumbnail):
     try:
         os.makedirs(f'{output_dir}/input')
         items = sorted([item for item in os.listdir(input_dir)
@@ -26,7 +26,7 @@ def main(input_dir, output_dir, brain_seg_data_dir, structure_id, parallel_proce
     exit_codes = [p.wait() for p in processes]
 
 
-if __name__ == '__main__':
+def create_cell_build_argparser():
     parser = argparse.ArgumentParser(description='Build Mouse Connectivity cell data')
     parser.add_argument('--input_dir', '-i', required=True, action='store',
                         help='Directory that contains predicted data')
@@ -36,6 +36,13 @@ if __name__ == '__main__':
                         help='Directory that will contain output')
     parser.add_argument('--structure_id', '-s', action='store', type=int, default=997,
                         help='Number of this instance')
+    parser.add_argument('--verify_thumbnail', '-t', action='store_true', default=False,
+                        help='Verify thumbnail/structure mask IOU')
+    return parser
+
+
+if __name__ == '__main__':
+    parser = create_cell_build_argparser()
     parser.add_argument('--parallel_processors', '-p', action='store', type=int, required=True,
                         help='Number of parallel processors')
     args = parser.parse_args()

@@ -13,13 +13,15 @@ import scipy.ndimage as ndi
 from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
+from build_cell_data import create_cell_build_argparser
 from dir_watcher import DirWatcher
 from localize_brain import detect_brain
 
 
 class ExperimentCellsProcessor(object):
     def __init__(self, mcc, experiment_id, input_dir, cache_dir, output_dir, brain_seg_data_dir, parent_struct_id,
-                 experiment_fields_to_save, details, logger, default_struct_id=997):
+                 experiment_fields_to_save, details, verify_thumbnail, logger, default_struct_id=997):
+        self.verify_thumbnail = verify_thumbnail
         self.experiment_fields_to_save = experiment_fields_to_save
         self.default_struct_id = default_struct_id
         self.parent_struct_id = parent_struct_id
@@ -129,6 +131,8 @@ class ExperimentCellsProcessor(object):
         }
 
     def is_acceptable_iou(self, offset_x, offset_y, section, struct_mask):
+        if not self.verify_thumbnail:
+            return True
         hippo_mask = self.load_hippo_mask(section)
         if hippo_mask is None:
             return True
@@ -178,9 +182,10 @@ class CellProcessor(DirWatcher):
         'primary_injection_structure'
     ]
 
-    def __init__(self, input_dir, output_dir, brain_seg_data_dir, structure_id, number):
+    def __init__(self, input_dir, output_dir, brain_seg_data_dir, structure_id, verify_thumbnail, number):
         super().__init__(*[os.path.join(output_dir, d) for d in ['input', 'proc', 'result']],
                          f'cell-processor-{number}')
+        self.verify_thumbnail = verify_thumbnail
         self.structure_id = structure_id
         self.brain_seg_data_dir = brain_seg_data_dir
         self.source_dir = input_dir
@@ -199,6 +204,7 @@ class CellProcessor(DirWatcher):
                                               self.structure_id,
                                               self.experiment_fields_to_save,
                                               self.experiments[item],
+                                              self.verify_thumbnail,
                                               self.logger)
         return experiment.process()
 
@@ -208,14 +214,8 @@ class CellProcessor(DirWatcher):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process predicted Mouse Connectivity cell data')
-    parser.add_argument('--input_dir', '-i', required=True, action='store',
-                        help='Directory that contains predicted data')
-    parser.add_argument('--brain_seg_data_dir', '-b', required=True, action='store',
-                        help='Directory that contains brain segmentation data')
-    parser.add_argument('--output_dir', '-o', required=True, action='store', help='Directory that will contain output')
+    parser = create_cell_build_argparser()
     parser.add_argument('--number', '-n', action='store', type=int, required=True, help='Number of this instance')
-    parser.add_argument('--structure_id', '-s', action='store', type=int, default=997, help='Number of this instance')
     args = parser.parse_args()
 
     print(vars(args))
