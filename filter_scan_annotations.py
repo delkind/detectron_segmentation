@@ -4,7 +4,7 @@ import os
 import cv2
 import numpy as np
 
-from process_predicted_crops import create_file_entry
+from extract_train_data_from_predicted import create_file_entry
 from rect import Rect
 
 input_dir = 'scan_thumbnails'

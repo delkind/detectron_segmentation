@@ -2,7 +2,6 @@ import os
 
 import cv2
 import pandas
-from allensdk.api.queries.image_download_api import ImageDownloadApi
 from shapely.geometry import Polygon
 from tqdm import tqdm
 
@@ -64,6 +63,7 @@ def process_section(experiments_dir, experiment_id, section_id):
 
 def main(experiments_dir):
     experiment_fields_to_save = [
+        'id',
         'gender',
         'injection_structures',
         'injection_volume',

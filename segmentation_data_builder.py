@@ -12,6 +12,7 @@ from dir_watcher import DirWatcher
 
 class ExperimentSectionData(object):
     def __init__(self, mcc, experiment_id, output_dir, anno, meta, rsp, logger, zoom=8, remove_transform_data=True):
+        self.remove_transform_data = remove_transform_data
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         self.mcc = mcc
@@ -30,11 +31,11 @@ class ExperimentSectionData(object):
         self.root_points = np.array(np.where(self.anno != 0)).T
         self.logger = logger
         self.logger.info(f"Initializing displacement transform data for {self.id}...")
-        self.__init_transform__(remove_transform_data)
+        self.__init_transform__()
         self.logger.info(f"Performing displacement transformation for {self.id}...")
         self.__init_transformed_points__()
 
-    def __init_transform__(self, remove_data):
+    def __init_transform__(self):
         temp = sitk.ReadImage(f'{self.output_dir}/dfmfld.mhd', sitk.sitkVectorFloat64)
         dfmfld_transform = sitk.DisplacementFieldTransform(temp)
 
@@ -45,11 +46,6 @@ class ExperimentSectionData(object):
         self.transform = sitk.Transform(3, sitk.sitkComposite)
         self.transform.AddTransform(aff_trans)
         self.transform.AddTransform(dfmfld_transform)
-
-        if remove_data:
-            os.remove(f'{self.output_dir}/dfmfld.mhd')
-            os.remove(f'{self.output_dir}/dfmfld.raw')
-            os.remove(f'{self.output_dir}/aff_param.txt')
 
     def __init_transformed_points__(self):
         self.transformed_points = self.__transform_points__(self.transform, self.root_points.astype(float) *
@@ -94,11 +90,17 @@ class ExperimentSectionData(object):
         self.logger.info(f"Saving segmentation data for {self.id}...")
         np.savez_compressed(f"{self.output_dir}/{self.id}-sections", new_result)
 
+    def cleanup(self):
+        if self.remove_transform_data:
+            os.remove(f'{self.output_dir}/dfmfld.mhd')
+            os.remove(f'{self.output_dir}/dfmfld.raw')
+            os.remove(f'{self.output_dir}/aff_param.txt')
+
 
 class SegmentationDataBuilder(DirWatcher):
     def __init__(self, output_dir, resolution, retain_transform_data, zoom, number, count):
         super().__init__(*[os.path.join(output_dir, d) for d in ['data/ready', 'data/proc', 'data/result']],
-                         f'downloader-{number}')
+                         f'segmentation-data-builder-{number}')
         self.count = count
         self.zoom = zoom
         self.retain_transform_data = retain_transform_data
@@ -110,12 +112,13 @@ class SegmentationDataBuilder(DirWatcher):
         self.rsp = self.mcc.get_reference_space()
         self.rsp.remove_unassigned()  # This removes ids that are not in this particular reference space
 
-    def process_item(self, item):
+    def process_item(self, item, directory):
         item = int(item)
-        experiment = ExperimentSectionData(self.mcc, item, f'{self.output_dir}/data/proc/{item}/', self.anno, self.meta, self.rsp,
+        experiment = ExperimentSectionData(self.mcc, item, directory, self.anno, self.meta, self.rsp,
                                            self.logger, zoom=self.zoom,
                                            remove_transform_data=not self.retain_transform_data)
         experiment.create_section_data()
+        experiment.cleanup()
 
 
 if __name__ == '__main__':

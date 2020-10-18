@@ -15,11 +15,11 @@ class SegmentationDataDownloader(DirWatcher):
         self.mcc.get_annotation_volume()
         self.mcc.get_reference_space()
 
-    def process_item(self, item):
+    def process_item(self, item, directory):
         self.logger.info(f"Download displacement data for {item}")
-        self.mcc.get_deformation_field(item, header_path=f'{self.intermediate_dir}/{item}/dfmfld.mhd',
-                                       voxel_path=f'{self.intermediate_dir}/{item}/dfmfld.raw')
-        self.mcc.get_affine_parameters(item, direction='trv', file_name=f'{self.intermediate_dir}/{item}/aff_param.txt')
+        self.mcc.get_deformation_field(item, header_path=f'{directory}/dfmfld.mhd',
+                                       voxel_path=f'{directory}/dfmfld.raw')
+        self.mcc.get_affine_parameters(item, direction='trv', file_name=f'{directory}/aff_param.txt')
 
 
 if __name__ == '__main__':
