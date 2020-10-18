@@ -95,10 +95,10 @@ class ExperimentCellsProcessor(object):
         struct_mask = self.get_structure_mask(section)
 
         if not self.is_acceptable_iou(offset_x, offset_y, section, struct_mask):
-            self.logger.info(f"Skipping section {section}, partial structure")
+            self.logger.info(f"Experiment: {self.id}, skipping section {section}, partial structure")
             return None
 
-        self.logger.info(f"Processing section {section}...")
+        self.logger.info(f"Experiment: {self.id}, processing section {section}...")
         struct_area = struct_mask.sum()
         cells = self.get_cell_mask(section, offset_x, offset_y)
 
