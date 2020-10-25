@@ -28,6 +28,7 @@ class TaskManager(ABC):
                 self.spawn_processors(num_processors)
             else:
                 self.prepare_input(**args)
+                args['number'] = 0
                 self.execute_task(**args)
         else:
             self.process_number = self.args['_processor_number']

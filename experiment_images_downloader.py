@@ -35,17 +35,22 @@ class ExperimentImagesDownloader(DirWatcher):
         locs = np.where(mask)
         sections = sorted(np.unique(locs[2]).tolist())
         for section in sections:
-            bboxes = self.extract_bounding_boxes(mask[:, :, section])
-            if not bboxes:
-                if section > 75:
-                    break
-                else:
-                    continue
-            self.logger.info(f"Experiment {experiment_id}, downloading section {section}...")
-            self.download_snapshot(experiment_id, section, bboxes, images[section], directory)
-            for bbox in bboxes:
-                if bbox.w > 5 and bbox.h > 5:
-                    self.download_section(experiment_id, section, bbox, images[section], directory)
+            if not self.process_section(directory, experiment_id, images, mask, section):
+                break
+
+    def process_section(self, directory, experiment_id, images, mask, section):
+        bboxes = self.extract_bounding_boxes(mask[:, :, section])
+        if not bboxes:
+            if section > 75:
+                return False
+            else:
+                return True
+        self.logger.info(f"Experiment {experiment_id}, downloading section {section}...")
+        self.download_snapshot(experiment_id, section, bboxes, images[section], directory)
+        for bbox in bboxes:
+            if bbox.w > 5 and bbox.h > 5:
+                self.download_section(experiment_id, section, bbox, images[section], directory)
+        return True
 
     def extract_bounding_boxes(self, mask):
         bboxes = self.get_bounding_boxes(mask)
