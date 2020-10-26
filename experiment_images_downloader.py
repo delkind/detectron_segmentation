@@ -15,8 +15,8 @@ from rect import Rect
 
 
 class ExperimentImagesDownloader(DirWatcher):
-    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir, number):
-        super().__init__(input_dir, process_dir, output_dir, f'experiment-images-downloader-{number}')
+    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir, _processor_number):
+        super().__init__(input_dir, process_dir, output_dir, f'experiment-images-downloader-{_processor_number}')
         self.structs = ast.literal_eval(structs)
         self.segmentation_dir = structure_map_dir
         self.mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')

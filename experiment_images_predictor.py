@@ -18,9 +18,9 @@ from predict_experiment import create_crops_list, extract_predictions
 
 
 class ExperimentImagesPredictor(DirWatcher):
-    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, parent_structs, connectivity_dir, number,
-                 cell_model, crop_size, border_size, device, threshold):
-        super().__init__(input_dir, process_dir, output_dir, f'experiment-images-predictor-{number}')
+    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, parent_structs, connectivity_dir,
+                 _processor_number, cell_model, crop_size, border_size, device, threshold):
+        super().__init__(input_dir, process_dir, output_dir, f'experiment-images-predictor-{_processor_number}')
         self.threshold = threshold
         self.device = device
         self.border_size = border_size
