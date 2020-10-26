@@ -106,9 +106,11 @@ class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
         mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')
         mcc.get_structure_tree()
 
-    def execute_task(self, structs, **kwargs):
-        downloader = ExperimentImagesPredictor(parent_structs=ast.literal_eval(structs), **kwargs)
-        downloader.run_until_empty()
+    def execute_task(self, structs, structure_map_dir, **kwargs):
+        downloader = ExperimentImagesPredictor(parent_structs=ast.literal_eval(structs),
+                                               structure_map_dir=structure_map_dir, **kwargs)
+        experiments = os.listdir(structure_map_dir)
+        downloader.run_until_count(len(experiments))
 
 
 if __name__ == '__main__':
