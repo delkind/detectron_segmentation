@@ -20,7 +20,7 @@ class TaskManager(ABC):
         self.args = vars(args)
 
         print(self.args)
-        args = {k: v for k, v in self.args.items() if k != 'processors' and k != '_processor_number'}
+        args = {k: v for k, v in self.args.items() if k != 'processors'}
         if 'processors' in self.args and self.args['processors'] is not None:
             num_processors = self.args['processors']
             if num_processors > 1:
