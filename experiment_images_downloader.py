@@ -1,6 +1,6 @@
-import argparse
 import ast
 import os
+import pickle
 import shutil
 import urllib.request
 
@@ -10,18 +10,18 @@ from allensdk.api.queries.image_download_api import ImageDownloadApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
 from dir_watcher import DirWatcher
+from experiment_process_task_manager import ExperimentProcessTaskManager
 from rect import Rect
-from task_manager import TaskManager
 
 
 class ExperimentImagesDownloader(DirWatcher):
-    def __init__(self, input_dir, intermediate_dir, results_dir, segmentation_dir, parent_structs, mcc_dir, number):
-        super().__init__(input_dir, intermediate_dir, results_dir, f'experiment-images-downloader-{number}')
-        self.parent_structs = parent_structs
-        self.segmentation_dir = segmentation_dir
-        self.mcc = MouseConnectivityCache(manifest_file=f'{mcc_dir}/mouse_connectivity_manifest.json')
+    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir, number):
+        super().__init__(input_dir, process_dir, output_dir, f'experiment-images-downloader-{number}')
+        self.structs = ast.literal_eval(structs)
+        self.segmentation_dir = structure_map_dir
+        self.mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')
         struct_tree = self.mcc.get_structure_tree()
-        structure_ids = [i for sublist in struct_tree.descendant_ids(self.parent_structs) for i in sublist]
+        structure_ids = [i for sublist in struct_tree.descendant_ids(self.structs) for i in sublist]
         self.structure_ids = set(structure_ids)
         self.image_api = ImageDownloadApi()
         self.bbox_dilation_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (14, 14))
@@ -33,37 +33,31 @@ class ExperimentImagesDownloader(DirWatcher):
         segmentation = np.load(f'{self.segmentation_dir}/{item}/{item}-sections.npz')['arr_0']
         mask = np.isin(segmentation, list(self.structure_ids))
         locs = np.where(mask)
-        sections = sorted(np.unique(locs[2]).tolist())
-        for section in sections:
-            if not self.process_section(directory, experiment_id, images, mask, section):
-                break
+        sections = [s for s in sorted(np.unique(locs[2]).tolist()) if s in images]
+        bboxes = {section: self.extract_bounding_boxes(mask[:, :, section]) for section in sections}
+        with open(f'{directory}/bboxes.pickle', 'wb') as f:
+            pickle.dump(bboxes, f)
+        for section in filter(lambda s: bboxes[s], sections):
+            self.process_section(directory, experiment_id, images, section, bboxes[section])
 
-    def process_section(self, directory, experiment_id, images, mask, section):
-        bboxes = self.extract_bounding_boxes(mask[:, :, section])
-        if not bboxes:
-            if section > 75:
-                return False
-            else:
-                return True
+    def process_section(self, directory, experiment_id, images, section, bboxes):
         self.logger.info(f"Experiment {experiment_id}, downloading section {section}...")
-        self.download_snapshot(experiment_id, section, bboxes, images[section], directory)
+        self.download_snapshot(experiment_id, section, images[section], directory)
         for bbox in bboxes:
-            if bbox.w > 5 and bbox.h > 5:
-                self.download_section(experiment_id, section, bbox, images[section], directory)
-        return True
+            self.download_fullres(experiment_id, section, bbox, images[section], directory)
 
-    def extract_bounding_boxes(self, mask):
+    def extract_bounding_boxes(self, mask, area_threshold=5000):
         bboxes = self.get_bounding_boxes(mask)
         bbmask = np.zeros_like(mask, dtype=np.uint8)
         for bbox in bboxes:
             cv2.rectangle(bbmask, *bbox.corners(), color=1, thickness=-1)
         bbmask = cv2.dilate(bbmask, self.bbox_dilation_kernel)
-        bboxes = self.get_bounding_boxes(bbmask)
+        bboxes = [bbox for bbox in self.get_bounding_boxes(bbmask) if bbox.area() > area_threshold]
         return bboxes
 
     @staticmethod
     def get_bounding_boxes(mask):
-        contours, hierarchy = cv2.findContours(mask.astype(np.uint8) * 255, cv2.RETR_EXTERNAL,
+        contours, hierarchy = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL,
                                                cv2.CHAIN_APPROX_SIMPLE)[-2:]
         rects = []
         for cnt in contours:
@@ -73,47 +67,31 @@ class ExperimentImagesDownloader(DirWatcher):
         return rects
 
     @staticmethod
-    def download_section(experiment_id, section, bbox, image_desc, directory):
+    def download_fullres(experiment_id, section, bbox, image_desc, directory):
         url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
               f'mime=1&zoom={8}&&filter=range&filterVals=0,534,0,1006,0,4095'
-        x, y, w, h = bbox
-        x, y, w, h = list(map(lambda a: a * 64, [x, y, w, h]))
+        x, y, w, h = bbox.scale(64)
         url += f'&top={y}&left={x}&width={w}&height={h}'
         filename = f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg'
         filename, _ = urllib.request.urlretrieve(url, filename=filename)
+        return filename
 
     @staticmethod
-    def download_snapshot(experiment_id, section, bboxes, image_desc, directory):
+    def download_snapshot(experiment_id, section, image_desc, directory):
         url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
               f'mime=1&zoom={2}&&filter=range&filterVals=0,534,0,1006,0,4095'
         filename = f'{directory}/thumbnail-{experiment_id}-{section}.jpg'
         filename, _ = urllib.request.urlretrieve(url, filename=filename)
-        image = cv2.imread(filename)
-        for bbox in bboxes:
-            if bbox.w > 5 and bbox.h > 5:
-                cv2.rectangle(image, *bbox.corners(), color=(0, 255, 0), thickness=2)
-        cv2.imwrite(filename, image)
+        return filename
 
 
-class ExperimentDownloadTaskManager(TaskManager):
+class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
     def __init__(self):
         super().__init__("Connectivity experiment downloader")
 
-    def add_args(self, parser: argparse.ArgumentParser):
-        parser.add_argument('--input-dir', '-i', action='store', required=True, help='Input directory')
-        parser.add_argument('--process_dir', '-d', action='store', required=True, help='Processing directory')
-        parser.add_argument('--output_dir', '-o', action='store', required=True,
-                            help='Results output directory')
-        parser.add_argument('--connectivity_dir', '-c', action='store', required=True,
-                            help='Connectivity cache directory')
-        parser.add_argument('--structure_map_dir', '-m', action='store', required=True,
-                            help='Connectivity cache directory')
-        parser.add_argument('--structs', '-s', action='store', required=True,
-                            help='List of structures to process')
-
-    def prepare_input(self, connectivity_dir, input_dir, process_dir, output_dir, structure_map_dir, structs):
+    def prepare_input(self, input_dir, connectivity_dir, structure_map_dir, **kwargs):
         mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')
-        struct_tree = mcc.get_structure_tree()
+        mcc.get_structure_tree()
         experiments = os.listdir(structure_map_dir)
         try:
             os.makedirs(input_dir)
@@ -125,9 +103,8 @@ class ExperimentDownloadTaskManager(TaskManager):
                     shutil.rmtree(f'{input_dir}/{e}')
                     os.makedirs(f'{input_dir}/{e}')
 
-    def execute_task(self, connectivity_dir, input_dir, process_dir, output_dir, structs, structure_map_dir):
-        downloader = ExperimentImagesDownloader(input_dir, process_dir, output_dir, structure_map_dir,
-                                                ast.literal_eval(structs), connectivity_dir, self.process_number)
+    def execute_task(self, **kwargs):
+        downloader = ExperimentImagesDownloader(**kwargs)
         downloader.run_until_empty()
 
 

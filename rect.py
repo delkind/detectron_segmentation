@@ -43,6 +43,9 @@ class Rect(namedtuple("RectBase", ['x', 'y', 'w', 'h'])):
         return Rect(x, y, w, h)
     __add__ = union
 
+    def scale(self, factor):
+        return Rect(y=int(self.y * factor), x=int(self.x * factor), w=int(self.w * factor), h=int(self.h * factor))
+
     @staticmethod
     def from_center(p, w, h):
         return Rect(y=p.y - h // 2, x=p.x - w // 2, h=h, w=w)

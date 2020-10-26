@@ -1,23 +1,20 @@
 import argparse
 import ast
 import os
+import pickle
 import re
-import shutil
-import urllib.request
 from collections import defaultdict
 
 import cv2
 import numpy as np
-from allensdk.api.queries.image_download_api import ImageDownloadApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 from detectron2.model_zoo import model_zoo
 
 from dir_watcher import DirWatcher
+from experiment_process_task_manager import ExperimentProcessTaskManager
 from predict_experiment import create_crops_list, extract_predictions
-from rect import Rect
-from task_manager import TaskManager
 
 
 class ExperimentImagesPredictor(DirWatcher):
@@ -51,18 +48,16 @@ class ExperimentImagesPredictor(DirWatcher):
         experiment_id = int(item)
         segmentation = np.load(f'{self.segmentation_dir}/{item}/{item}-sections.npz')['arr_0']
         mask = np.isin(segmentation, list(self.structure_ids))
-        sections_list = [tuple([int(s) for s in re.findall('\\d+', c)]) for c in os.listdir(directory) if
-                         c.startswith('full-')]
-        sections = defaultdict(list)
-        for _, section, x, y, w, h in sections_list:
-            sections[section].append((x, y, w, h))
+        with open(f'{directory}/bboxes.pickle', 'rb') as f:
+            bboxes = pickle.load(f)
+        sections = sorted([s for s in bboxes.keys() if bboxes[s]])
+        for section in sorted(sections):
+            self.process_section(directory, experiment_id, section, bboxes[section], mask[:, :, section])
 
-        for section in sorted(list(sections.keys())):
-            self.process_section(directory, experiment_id, section, sections, mask[:, :, section])
-
-    def process_section(self, directory, experiment_id, section, sections, mask):
+    def process_section(self, directory, experiment_id, section, bboxes, mask):
         self.logger.info(f"Experiment {experiment_id}: processing section {section}...")
-        for x, y, w, h in sections[section]:
+        for bbox in bboxes:
+            x, y, w, h = bbox.scale(64)
             image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
                                cv2.IMREAD_GRAYSCALE)
             img_mask = self.predict_cells(image, mask, x, y)
@@ -94,21 +89,12 @@ class ExperimentImagesPredictor(DirWatcher):
         return mask
 
 
-class ExperimentDownloadTaskManager(TaskManager):
+class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
     def __init__(self):
         super().__init__("Connectivity experiment downloader")
 
     def add_args(self, parser: argparse.ArgumentParser):
-        parser.add_argument('--input-dir', '-i', action='store', required=True, help='Input directory')
-        parser.add_argument('--process_dir', '-d', action='store', required=True, help='Processing directory')
-        parser.add_argument('--output_dir', '-o', action='store', required=True,
-                            help='Results output directory')
-        parser.add_argument('--connectivity_dir', '-c', action='store', required=True,
-                            help='Connectivity cache directory')
-        parser.add_argument('--structure_map_dir', '-m', action='store', required=True,
-                            help='Connectivity cache directory')
-        parser.add_argument('--structs', '-s', action='store', required=True,
-                            help='List of structures to process')
+        super().add_args(parser)
         parser.add_argument('--cell_model', action='store', required=True, help='Cell segmentation model')
         parser.add_argument('--crop_size', default=312, type=int, action='store', help='Size of a single crop')
         parser.add_argument('--border_size', default=20, type=int, action='store',
