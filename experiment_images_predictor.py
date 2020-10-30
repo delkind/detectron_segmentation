@@ -89,7 +89,7 @@ class ExperimentImagesPredictor(DirWatcher):
         return mask
 
 
-class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
+class ExperimentPredictorTaskManager(ExperimentProcessTaskManager):
     def __init__(self):
         super().__init__("Connectivity experiment downloader")
 
@@ -107,12 +107,12 @@ class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
         mcc.get_structure_tree()
 
     def execute_task(self, structs, structure_map_dir, **kwargs):
-        downloader = ExperimentImagesPredictor(parent_structs=ast.literal_eval(structs),
+        predictor = ExperimentImagesPredictor(parent_structs=ast.literal_eval(structs),
                                                structure_map_dir=structure_map_dir, **kwargs)
         experiments = os.listdir(structure_map_dir)
-        downloader.run_until_count(len(experiments))
+        predictor.run_until_count(len(experiments))
 
 
 if __name__ == '__main__':
-    dl = ExperimentDownloadTaskManager()
+    dl = ExperimentPredictorTaskManager()
     dl.run()

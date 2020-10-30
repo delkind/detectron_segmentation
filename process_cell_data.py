@@ -1,4 +1,5 @@
 import argparse
+import ast
 import functools
 import operator as op
 import os
@@ -13,8 +14,8 @@ import scipy.ndimage as ndi
 from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
-from build_cell_data import create_cell_build_argparser
 from dir_watcher import DirWatcher
+from experiment_process_task_manager import ExperimentProcessTaskManager
 from localize_brain import detect_brain
 
 
@@ -184,16 +185,15 @@ class CellProcessor(DirWatcher):
         'primary_injection_structure'
     ]
 
-    def __init__(self, input_dir, output_dir, brain_seg_data_dir, structure_id, verify_thumbnail, number):
-        super().__init__(*[os.path.join(output_dir, d) for d in ['input', 'proc', 'result']],
-                         f'cell-processor-{number}')
+    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir,
+                 verify_thumbnail, _processor_number):
+        super().__init__(input_dir, process_dir, output_dir, f'cell-processor-{_processor_number}')
         self.verify_thumbnail = verify_thumbnail
-        self.structure_id = structure_id
-        self.brain_seg_data_dir = brain_seg_data_dir
+        self.structure_ids = structs
+        self.brain_seg_data_dir = structure_map_dir
         self.source_dir = input_dir
         self.output_dir = output_dir
-        self.mcc = MouseConnectivityCache(manifest_file=f'{self.source_dir}'
-                                                        f'/connectivity/mouse_connectivity_manifest.json',
+        self.mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json',
                                           resolution=25)
         self.experiments = {int(e['id']): e for e in self.mcc.get_experiments(dataframe=False)}
 
@@ -203,7 +203,7 @@ class CellProcessor(DirWatcher):
                                               f'{self.source_dir}/cache/{item}/',
                                               directory,
                                               f'{self.brain_seg_data_dir}/{item}',
-                                              self.structure_id,
+                                              self.structure_ids,
                                               self.experiment_fields_to_save,
                                               self.experiments[item],
                                               self.verify_thumbnail,
@@ -211,11 +211,24 @@ class CellProcessor(DirWatcher):
         experiment.process()
 
 
-if __name__ == '__main__':
-    parser = create_cell_build_argparser()
-    parser.add_argument('--number', '-n', action='store', type=int, required=True, help='Number of this instance')
-    args = parser.parse_args()
+class ExperimentCellAnalyzerTaskManager(ExperimentProcessTaskManager):
+    def __init__(self):
+        super().__init__("Connectivity experiment cell data analyzer")
 
-    print(vars(args))
-    processor = CellProcessor(**vars(args))
-    processor.run_until_empty()
+    def add_args(self, parser: argparse.ArgumentParser):
+        super().add_args(parser)
+        parser.add_argument('--verify_thumbnail', action='store_true', default=False, help='Prediction threshold')
+
+    def prepare_input(self, connectivity_dir, **kwargs):
+        mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')
+        mcc.get_structure_tree()
+
+    def execute_task(self, structs, structure_map_dir, **kwargs):
+        analyzer = CellProcessor(structs=ast.literal_eval(structs), structure_map_dir=structure_map_dir, **kwargs)
+        experiments = os.listdir(structure_map_dir)
+        analyzer.run_until_count(len(experiments))
+
+
+if __name__ == '__main__':
+    task_mgr = ExperimentCellAnalyzerTaskManager()
+    task_mgr.run()

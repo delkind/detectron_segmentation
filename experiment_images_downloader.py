@@ -2,6 +2,7 @@ import ast
 import os
 import pickle
 import shutil
+import urllib.error
 import urllib.request
 
 import cv2
@@ -15,7 +16,8 @@ from rect import Rect
 
 
 class ExperimentImagesDownloader(DirWatcher):
-    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir, _processor_number):
+    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir,
+                 _processor_number):
         super().__init__(input_dir, process_dir, output_dir, f'experiment-images-downloader-{_processor_number}')
         self.structs = ast.literal_eval(structs)
         self.segmentation_dir = structure_map_dir
@@ -66,23 +68,41 @@ class ExperimentImagesDownloader(DirWatcher):
                 rects.append(Rect(x=x, y=y, w=w, h=h))
         return rects
 
-    @staticmethod
-    def download_fullres(experiment_id, section, bbox, image_desc, directory):
+    def download_fullres(self, experiment_id, section, bbox, image_desc, directory):
         url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
               f'mime=1&zoom={8}&&filter=range&filterVals=0,534,0,1006,0,4095'
         x, y, w, h = bbox.scale(64)
         url += f'&top={y}&left={x}&width={w}&height={h}'
         filename = f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg'
-        filename, _ = urllib.request.urlretrieve(url, filename=filename)
+        filename, _ = self.retrieve_url(filename, url)
         return filename
 
-    @staticmethod
-    def download_snapshot(experiment_id, section, image_desc, directory):
+    def download_snapshot(self, experiment_id, section, image_desc, directory):
         url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
               f'mime=1&zoom={2}&&filter=range&filterVals=0,534,0,1006,0,4095'
         filename = f'{directory}/thumbnail-{experiment_id}-{section}.jpg'
-        filename, _ = urllib.request.urlretrieve(url, filename=filename)
+        filename, _ = self.retrieve_url(filename, url)
         return filename
+
+    def retrieve_url(self, filename, url, retries=100):
+        if os.path.isfile(filename):
+            self.logger.info("File {} already downloaded")
+            return filename, None
+
+        while True:
+            try:
+                fname, msg = urllib.request.urlretrieve(url, filename=f'{filename}.partial')
+                os.replace(fname, filename)
+                return filename, msg
+            except urllib.error.HTTPError as e:
+                if 500 <= e.code < 600:
+                    retries = retries - 1
+                    if retries > 0:
+                        self.logger.warn(f"Transient error downloading {filename}, "
+                                         f"retrying ({retries} retries left) ...", e)
+                        continue
+                    else:
+                        self.logger.error(f"Retry count exceeded for {filename}, exiting...")
 
 
 class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
