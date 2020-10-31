@@ -99,7 +99,7 @@ class ExperimentImagesDownloader(DirWatcher):
                     retries = retries - 1
                     if retries > 0:
                         self.logger.warn(f"Transient error downloading {filename}, "
-                                         f"retrying ({retries} retries left) ...", e)
+                                         f"retrying ({retries} retries left) ...", exc_info=e)
                         continue
                     else:
                         self.logger.error(f"Retry count exceeded for {filename}, exiting...")
