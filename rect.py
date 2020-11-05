@@ -5,6 +5,9 @@ class Rect(namedtuple("RectBase", ['x', 'y', 'w', 'h'])):
     def point_in(self, x, y):
         return self.x <= x <= self.x + self.w and self.y <= y <= self.y + self.h
 
+    def rect_in(self, r):
+        return self.point_in(*r.corners()[0]) and self.point_in(*r.corners()[1])
+
     def intersection(self, rect):
         x = max(self.x, rect.x)
         y = max(self.y, rect.y)
@@ -45,6 +48,9 @@ class Rect(namedtuple("RectBase", ['x', 'y', 'w', 'h'])):
 
     def scale(self, factor):
         return Rect(y=int(self.y * factor), x=int(self.x * factor), w=int(self.w * factor), h=int(self.h * factor))
+
+    def move(self, offset):
+        return Rect(y=int(self.y + offset), x=int(self.x + offset), w=self.w, h=self.h)
 
     @staticmethod
     def from_center(p, w, h):
