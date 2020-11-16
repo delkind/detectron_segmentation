@@ -75,7 +75,7 @@ class ExperimentDataAnnotator(object):
             cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cnts = [cnt.squeeze() // 4 for cnt in cnts if cnt.shape[0] > 2]
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            cv2.polylines(image, cnts, color=(0, 255, 0), thickness=2, isClosed=True)
+            cv2.polylines(image, cnts, color=(0, 255, 0), thickness=1, isClosed=True)
             thumb[y // 4: y // 4 + image.shape[0], x // 4: x // 4 + image.shape[1], :] = image
         cv2.imwrite(f"{self.directory}/annotated-{self.experiment_id}-{section}.jpg", thumb)
 
