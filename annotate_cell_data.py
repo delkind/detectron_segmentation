@@ -95,6 +95,7 @@ class ExperimentDataAnnotator(object):
 
         self.logger.info(f"Experiment {self.experiment_id}: Saving {name}...")
         plt.savefig(f"{self.directory}/{name}-{self.experiment_id}.pdf", dpi=2400)
+        plt.close()
 
     def process_section(self, ax, kwargs, placer, section, zoom):
         section_celldata = self.celldata[self.celldata.section == section]
