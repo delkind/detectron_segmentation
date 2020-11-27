@@ -23,8 +23,8 @@ class ExperimentImagesPredictor(DirWatcher):
         super().__init__(input_dir, process_dir, output_dir, f'experiment-images-predictor-{_processor_number}')
         self.threshold = threshold
         self.device = device
-        if device == 'cuda':
-            self.device += f':{_processor_number}'
+        if device == 'cuda:':
+            self.device += str(_processor_number)
         self.border_size = border_size
         self.crop_size = crop_size
         self.cell_model = cell_model
