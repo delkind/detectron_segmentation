@@ -48,7 +48,7 @@ class ExperimentImagesDownloader(DirWatcher):
         for bbox in bboxes:
             self.download_fullres(experiment_id, section, bbox, images[section], directory)
 
-    def extract_bounding_boxes(self, mask, area_threshold=5000):
+    def extract_bounding_boxes(self, mask, area_threshold=0):
         bboxes = self.get_bounding_boxes(mask)
         bbmask = np.zeros_like(mask, dtype=np.uint8)
         for bbox in bboxes:

@@ -48,3 +48,4 @@ Shapely~=1.7.0
 pandas~=0.25.3
 SimpleITK~=1.2.4
 scipy~=1.5.2
+scikit-learn~=0.23.2
