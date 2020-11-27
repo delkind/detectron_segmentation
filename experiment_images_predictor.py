@@ -23,6 +23,8 @@ class ExperimentImagesPredictor(DirWatcher):
         super().__init__(input_dir, process_dir, output_dir, f'experiment-images-predictor-{_processor_number}')
         self.threshold = threshold
         self.device = device
+        if device == 'cuda':
+            self.device += f':{_processor_number}'
         self.border_size = border_size
         self.crop_size = crop_size
         self.cell_model = cell_model
@@ -116,3 +118,5 @@ class ExperimentPredictorTaskManager(ExperimentProcessTaskManager):
 if __name__ == '__main__':
     dl = ExperimentPredictorTaskManager()
     dl.run()
+
+# python experiment_images_predictor.py -i output/full_brain/downloaded -d output/full_brain/pd_proc -o output/full_brain/predicted -c mouse_connectivity -m output/sectiondata/data/result -s "[997]" -p2 --cell_model output/new_cells/model_0324999.pth
