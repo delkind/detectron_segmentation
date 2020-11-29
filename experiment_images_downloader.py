@@ -86,7 +86,7 @@ class ExperimentImagesDownloader(DirWatcher):
 
     def retrieve_url(self, filename, url, retries=100):
         if os.path.isfile(filename):
-            self.logger.info("File {} already downloaded")
+            self.logger.info(f"File {filename} already downloaded")
             return filename, None
 
         while True:
