@@ -118,10 +118,11 @@ class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
             for e in experiments:
                 os.makedirs(f'{input_dir}/{e}')
         except FileExistsError:
-            for e in experiments:
-                if os.path.isdir(f'{input_dir}/{e}'):
-                    shutil.rmtree(f'{input_dir}/{e}')
-                    os.makedirs(f'{input_dir}/{e}')
+            pass
+            # for e in experiments:
+            #     if os.path.isdir(f'{input_dir}/{e}'):
+            #         shutil.rmtree(f'{input_dir}/{e}')
+            #         os.makedirs(f'{input_dir}/{e}')
 
     def execute_task(self, **kwargs):
         downloader = ExperimentImagesDownloader(**kwargs)
