@@ -86,7 +86,7 @@ class ExperimentImagesDownloader(DirWatcher):
 
     def retrieve_url(self, filename, url, retries=100):
         if os.path.isfile(filename):
-            self.logger.info(f"File {filename} already downloaded")
+            self.logger.debug(f"File {filename} already downloaded")
             return filename, None
 
         while True:
@@ -98,11 +98,11 @@ class ExperimentImagesDownloader(DirWatcher):
                 if 500 <= e.code < 600:
                     retries = retries - 1
                     if retries > 0:
-                        self.logger.warn(f"Transient error downloading {filename}, "
-                                         f"retrying ({retries} retries left) ...", exc_info=e)
+                        self.logger.debug(f"Transient error downloading {url}, "
+                                          f"retrying ({retries} retries left) ...", exc_info=e)
                         continue
                     else:
-                        self.logger.error(f"Retry count exceeded for {filename}, exiting...")
+                        self.logger.error(f"Retry count exceeded for {url}, exiting...")
 
 
 class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
