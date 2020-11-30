@@ -2,6 +2,7 @@ import ast
 import os
 import pickle
 import shutil
+import time
 import urllib.error
 import urllib.request
 
@@ -84,26 +85,29 @@ class ExperimentImagesDownloader(DirWatcher):
         filename, _ = self.retrieve_url(filename, url)
         return filename
 
-    def retrieve_url(self, filename, url, retries=100):
+    def retrieve_url(self, filename, url, retries=10):
         if os.path.isfile(filename):
             self.logger.debug(f"File {filename} already downloaded")
             return filename, None
 
+        backoff = 0
         while True:
             try:
+                time.sleep(2 ** backoff)
                 fname, msg = urllib.request.urlretrieve(url, filename=f'{filename}.partial')
                 os.replace(fname, filename)
                 return filename, msg
             except urllib.error.HTTPError as e:
-                if 500 <= e.code < 600:
-                    retries = retries - 1
+                backoff += 1
+                if 500 <= e.code < 600 and retries > 0:
+                    retries -= 1
                     if retries > 0:
-                        self.logger.debug(f"Transient error downloading {url}, "
-                                          f"retrying ({retries} retries left) ...", exc_info=e)
+                        self.logger.info(f"Transient error downloading {url}, "
+                                         f"retrying ({retries} retries left) ...", exc_info=e)
                         continue
-                    else:
-                        self.logger.exception(f"Retry count exceeded for {url} ({filename}), exiting...")
-                        raise e
+                else:
+                    self.logger.exception(f"Retry count exceeded or permanent error for {url} ({filename}), exiting...")
+                    raise e
 
 
 class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
