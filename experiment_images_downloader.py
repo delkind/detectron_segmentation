@@ -102,7 +102,7 @@ class ExperimentImagesDownloader(DirWatcher):
                                           f"retrying ({retries} retries left) ...", exc_info=e)
                         continue
                     else:
-                        self.logger.error(f"Retry count exceeded for {url}, exiting...")
+                        self.logger.exception(f"Retry count exceeded for {url} ({filename}), exiting...")
 
 
 class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
