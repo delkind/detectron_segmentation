@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 
+import PIL.Image
 import cv2
 import numpy as np
 from skimage import io
@@ -15,6 +16,8 @@ from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
 from rect import Rect
+
+PIL.Image.MAX_IMAGE_PIXELS = None
 
 
 class ExperimentImagesDownloader(DirWatcher):
