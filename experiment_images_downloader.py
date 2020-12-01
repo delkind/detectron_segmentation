@@ -8,6 +8,7 @@ import urllib.request
 
 import cv2
 import numpy as np
+from skimage import io
 from allensdk.api.queries.image_download_api import ImageDownloadApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
@@ -75,7 +76,17 @@ class ExperimentImagesDownloader(DirWatcher):
         x, y, w, h = bbox.scale(64)
         url += f'&top={y}&left={x}&width={w}&height={h}'
         filename = f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg'
-        filename, _ = self.retrieve_url(filename, url)
+        for retries in range(3):
+            filename, _ = self.retrieve_url(filename, url)
+            try:
+                io.imread(filename)
+                break
+            except Exception as e:
+                os.remove(filename)
+                self.logger.info("Corrupted file, re-downloading")
+                if retries == 2:
+                    raise e
+
         return filename
 
     def download_snapshot(self, experiment_id, section, image_desc, directory):
