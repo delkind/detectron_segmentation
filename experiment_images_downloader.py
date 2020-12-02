@@ -33,6 +33,13 @@ class ExperimentImagesDownloader(DirWatcher):
         self.image_api = ImageDownloadApi()
         self.bbox_dilation_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (14, 14))
 
+    def on_process_error(self, item, exception):
+        retval = super().on_process_error(item, exception)
+        if type(exception) == urllib.error.HTTPError:
+            return False
+        else:
+            return retval
+
     def process_item(self, item, directory):
         experiment_id = int(item)
         images = self.image_api.section_image_query(experiment_id)

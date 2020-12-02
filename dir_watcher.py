@@ -39,8 +39,8 @@ class DirWatcher(ABC):
         try:
             self.process_item(item, directory)
         except Exception as e:
-            self.on_process_error(item)
-            raise e
+            if self.on_process_error(item, e):
+                raise e
 
         os.replace(os.path.join(self.__intermediate_dir__, item), os.path.join(self.__results_dir__, item))
 
@@ -72,8 +72,9 @@ class DirWatcher(ABC):
             else:
                 time.sleep(1)
 
-    def on_process_error(self, item):
+    def on_process_error(self, item, exception):
         os.replace(os.path.join(self.__intermediate_dir__, item), os.path.join(self.__input_dir__, item))
+        return True
 
     @abstractmethod
     def process_item(self, item, directory):
