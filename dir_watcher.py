@@ -38,11 +38,10 @@ class DirWatcher(ABC):
     def handle_item(self, item, directory):
         try:
             self.process_item(item, directory)
+            os.replace(os.path.join(self.__intermediate_dir__, item), os.path.join(self.__results_dir__, item))
         except Exception as e:
             if self.on_process_error(item, e):
                 raise e
-
-        os.replace(os.path.join(self.__intermediate_dir__, item), os.path.join(self.__results_dir__, item))
 
     def run_until_empty(self):
         while True:
