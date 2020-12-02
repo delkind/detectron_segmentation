@@ -35,7 +35,8 @@ class ExperimentImagesDownloader(DirWatcher):
 
     def on_process_error(self, item, exception):
         retval = super().on_process_error(item, exception)
-        if type(exception) == urllib.error.HTTPError:
+        self.logger.error(f"Error occurred during processing", exc_info=True)
+        if type(exception) in [urllib.error.HTTPError, OSError, ValueError]:
             return False
         else:
             return retval
@@ -87,13 +88,13 @@ class ExperimentImagesDownloader(DirWatcher):
         url += f'&top={y}&left={x}&width={w}&height={h}'
         filename = f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg'
         for retries in range(3):
-            filename, _ = self.retrieve_url(filename, url)
+            fname, _ = self.retrieve_url(filename, url)
             try:
-                io.imread(filename)
+                io.imread(fname)
                 break
             except Exception as e:
-                os.remove(filename)
-                self.logger.info("Corrupted file, re-downloading")
+                os.remove(fname)
+                self.logger.info(f"Corrupted file {fname}, re-downloading {filename}")
                 if retries == 2:
                     raise e
 
@@ -124,7 +125,7 @@ class ExperimentImagesDownloader(DirWatcher):
                     retries -= 1
                     if retries > 0:
                         self.logger.info(f"Transient error downloading {url}, "
-                                         f"retrying ({retries} retries left) ...", exc_info=e)
+                                         f"retrying ({retries} retries left) ...", exc_info=True)
                         continue
                 else:
                     self.logger.exception(f"Retry count exceeded or permanent error for {url} ({filename}), exiting...")
