@@ -9,7 +9,7 @@ import urllib.request
 import PIL.Image
 import cv2
 import numpy as np
-from skimage import io
+from PIL import Image
 from allensdk.api.queries.image_download_api import ImageDownloadApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
@@ -90,7 +90,8 @@ class ExperimentImagesDownloader(DirWatcher):
         for retries in range(3):
             fname, _ = self.retrieve_url(filename, url)
             try:
-                io.imread(fname)
+                image = Image.open(fname)
+                image.verify()
                 break
             except Exception as e:
                 os.remove(fname)
@@ -109,10 +110,11 @@ class ExperimentImagesDownloader(DirWatcher):
 
     def retrieve_url(self, filename, url, retries=10):
         if os.path.isfile(filename):
-            self.logger.debug(f"File {filename} already downloaded")
+            self.logger.info(f"File {filename} already downloaded")
             return filename, None
 
         backoff = 0
+        urllib.request.urlcleanup()
         while True:
             try:
                 time.sleep(2 ** backoff)
