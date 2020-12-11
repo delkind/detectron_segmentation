@@ -13,6 +13,6 @@ class ExperimentProcessTaskManager(TaskManager, ABC):
         parser.add_argument('--connectivity_dir', '-c', action='store', required=True,
                             help='Connectivity cache directory')
         parser.add_argument('--structure_map_dir', '-m', action='store', required=True,
-                            help='Connectivity cache directory')
+                            help='Brain structure map directory')
         parser.add_argument('--structs', '-s', action='store', required=True,
                             help='List of structures to process')
