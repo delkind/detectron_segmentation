@@ -26,7 +26,7 @@ class ExperimentDataAnnotator(object):
         with open(f'{self.directory}/bboxes.pickle', "rb") as f:
             bboxes = pickle.load(f)
         self.bboxes = {k: v for k, v in bboxes.items() if v}
-        self.celldata = pd.read_csv(f'{self.directory}/celldata-{self.experiment_id}.csv')
+        self.celldata = pd.read_csv(f'{self.directory}/pyr_celldata-{self.experiment_id}.csv')
         self.tile_dim = int(math.ceil(math.sqrt(len(self.bboxes))))
 
     @staticmethod
