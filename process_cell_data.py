@@ -50,6 +50,14 @@ class ExperimentCellsProcessor(object):
         mask = ndi.binary_closing(ndi.binary_fill_holes(mask).astype(np.int8)).astype(np.int8)
         return mask
 
+    @staticmethod
+    def calculate_densities(centroids):
+        densities = np.zeros(centroids.shape[0], dtype=np.int16)
+        for i in range(centroids.shape[0]):
+            dists = np.max(np.abs(centroids - centroids[i, :]), axis=1) < 167
+            densities[i] = dists.sum()
+        return densities
+
     def process(self):
         with open(f'{self.directory}/bboxes.pickle', 'rb') as f:
             bboxes = pickle.load(f)
@@ -62,6 +70,9 @@ class ExperimentCellsProcessor(object):
             cell_data += cells
 
         csv = pandas.DataFrame(cell_data)
+        centroids = np.array([csv.centroid_x, csv.centroid_y]).swapaxes(0, 1).astype(np.int16)
+        densities = self.calculate_densities(centroids)
+        csv['density'] = np.array(densities)
         csv.to_csv(f'{self.directory}/celldata-{self.id}.csv')
 
         csv = pandas.DataFrame(section_data)
