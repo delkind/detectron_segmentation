@@ -25,15 +25,16 @@ class ExperimentPyramidalExtractor(object):
         self.structures = [f'Field CA{i}' for i in range(1, 4)]
         self.pyramidal_layers = {s: self.get_pyramidal_layer(tree, s) for s in self.structures}
 
-    def create_heatmap(self, celldata, celldata_struct, section, binsize=1):
+    def create_heatmap(self, celldata_struct, section, binsize=1, method=lambda c, d: max(c, d)):
         thumb = cv2.imread(f"{self.directory}/thumbnail-{self.experiment_id}-{section}.jpg",
                            cv2.IMREAD_GRAYSCALE)
-        section_celldata = celldata_struct.loc[celldata.section == section]
+        section_celldata = celldata_struct.loc[celldata_struct.section == section]
         heatmap = np.zeros((thumb.shape[0] // binsize, thumb.shape[1] // binsize), dtype=int)
         x = (section_celldata.centroid_x.to_numpy() // 64 // binsize).astype(int)
         y = (section_celldata.centroid_y.to_numpy() // 64 // binsize).astype(int)
+        densities = (section_celldata.density.to_numpy()).astype(int)
         for i in range(len(section_celldata)):
-            heatmap[y[i], x[i]] += 1
+            heatmap[y[i], x[i]] = method(heatmap[y[i], x[i]], densities[i])
         heatmap = np.kron(heatmap, np.ones((binsize, binsize)))
         return heatmap, thumb
 
@@ -90,7 +91,7 @@ class ExperimentPyramidalExtractor(object):
             struct_id = np.unique(celldata_struct.structure_id.to_numpy())
             mask = structure_data == struct_id
 
-            heatmaps[structure] = {s: self.create_heatmap(celldata, celldata_struct, s, 2) for s in relevant_sections}
+            heatmaps[structure] = {s: self.create_heatmap(celldata_struct, s, 2) for s in relevant_sections}
 
             for section, data in heatmaps[structure].items():
                 heatmap, _ = data
@@ -119,7 +120,7 @@ class ExperimentPyramidalExtractor(object):
                 celldata.at[row.Index, 'structure_id'] = struct
                 celldata.at[row.Index, 'structure'] = pyramidal_layers[struct]
 
-        celldata.to_csv(f'{self.directory}/pyr_celldata-{self.experiment_id}.csv')
+        celldata.to_csv(f'{self.directory}/pyr_celldata_cell-{self.experiment_id}.csv')
 
 
 class CellProcessor(DirWatcher):
