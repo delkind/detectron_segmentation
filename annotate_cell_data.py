@@ -26,7 +26,7 @@ class ExperimentDataAnnotator(object):
         with open(f'{self.directory}/bboxes.pickle', "rb") as f:
             bboxes = pickle.load(f)
         self.bboxes = {k: v for k, v in bboxes.items() if v}
-        self.celldata = pd.read_csv(f'{self.directory}/pyr_celldata-{self.experiment_id}.csv')
+        self.celldata = pd.read_csv(f'{self.directory}/pyr_celldata_cell-{self.experiment_id}.csv')
         self.tile_dim = int(math.ceil(math.sqrt(len(self.bboxes))))
 
     @staticmethod
@@ -52,7 +52,7 @@ class ExperimentDataAnnotator(object):
         return mycmap
 
     def process(self):
-        self.create_images()
+        # self.create_images()
         self.create_tiles(placer=self.place_heatmap, name='heatmaps', zoom=1, binsize=5)
         self.create_tiles(placer=self.place_patches, name='patches', zoom=4, gridsize=5)
 
@@ -94,7 +94,7 @@ class ExperimentDataAnnotator(object):
             self.decorate_section(ax, fig, labels, p)
 
         self.logger.info(f"Experiment {self.experiment_id}: Saving {name}...")
-        plt.savefig(f"{self.directory}/{name}-{self.experiment_id}.pdf", dpi=2400)
+        plt.savefig(f"{self.directory}/{name}_cell-{self.experiment_id}.pdf", dpi=2400)
         plt.close()
 
     def process_section(self, ax, kwargs, placer, section, zoom):
