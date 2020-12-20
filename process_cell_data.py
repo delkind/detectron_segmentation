@@ -51,10 +51,10 @@ class ExperimentCellsProcessor(object):
         return mask
 
     @staticmethod
-    def calculate_densities(centroids):
+    def calculate_densities(centroids, radius=84):
         densities = np.zeros(centroids.shape[0], dtype=np.int16)
         for i in range(centroids.shape[0]):
-            dists = np.max(np.abs(centroids - centroids[i, :]), axis=1) < 167
+            dists = np.max(np.abs(centroids - centroids[i, :]), axis=1) < radius
             densities[i] = dists.sum()
         return densities
 
