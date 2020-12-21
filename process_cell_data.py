@@ -4,6 +4,8 @@ import functools
 import operator as op
 import os
 import pickle
+from collections import defaultdict
+from functools import reduce
 
 import numpy as np
 import cv2
@@ -13,10 +15,103 @@ import scipy.ndimage as ndi
 
 from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+from sklearn.cluster import KMeans
 
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
 from localize_brain import detect_brain
+
+
+class ExperimentPyramidalExtractor(object):
+    def __init__(self, experiment_id, directory, structdata_dir, celldata, method, mcc, column_name, logger):
+        self.column_name = column_name
+        self.method = method
+        self.logger = logger
+        self.structdata_dir = structdata_dir
+        self.directory = directory
+        self.experiment_id = experiment_id
+        tree = mcc.get_structure_tree()
+        self.structures_including_pyramidal = [f'Field CA{i}' for i in range(1, 4)]
+        self.pyramidal_layers = {s: self.get_pyramidal_layer(tree, s) for s in self.structures_including_pyramidal}
+        self.celldata = celldata
+
+    def create_heatmap(self, celldata_struct, section, binsize=1):
+        thumb = cv2.imread(f"{self.directory}/thumbnail-{self.experiment_id}-{section}.jpg",
+                           cv2.IMREAD_GRAYSCALE)
+        section_celldata = celldata_struct.loc[celldata_struct.section == section]
+        heatmap = np.zeros((thumb.shape[0] // binsize, thumb.shape[1] // binsize), dtype=int)
+        x = (section_celldata.centroid_x.to_numpy() // 64 // binsize).astype(int)
+        y = (section_celldata.centroid_y.to_numpy() // 64 // binsize).astype(int)
+        densities = (section_celldata.density.to_numpy()).astype(int)
+        for i in range(len(section_celldata)):
+            heatmap[y[i], x[i]] = self.method(heatmap[y[i], x[i]], densities[i])
+        heatmap = np.kron(heatmap, np.ones((binsize, binsize)))
+        return heatmap, thumb
+
+    @staticmethod
+    def process_section(heatmap, mask):
+        coords = np.where(heatmap != 0)
+        cells = heatmap[coords]
+        dense_cells = np.zeros_like(heatmap)
+        if cells.shape[0] > 2:
+            model = KMeans(n_clusters=2)
+            yhat = model.fit_predict(cells.reshape(-1, 1) ** 2)
+            clusters = np.unique(yhat).tolist()
+            if len(clusters) == 1:
+                yhat = np.zeros_like(cells)
+                dense = 1
+            else:
+                dense = np.argmax([cells[yhat == 0].mean(), cells[yhat == 1].mean()])
+
+            dense_cells[coords[0][(yhat == dense)], coords[1][(yhat == dense)]] = 1
+            dense_cells = ndi.binary_dilation(dense_cells, ndi.generate_binary_structure(2, 1), iterations=2)
+            dense_cells = ndi.binary_closing(dense_cells, ndi.generate_binary_structure(2, 1), iterations=2)
+            dense_cells, comps = ndi.measurements.label(dense_cells)
+            if comps > 0:
+                sums = np.array([(dense_cells == i + 1).sum() for i in range(comps)])
+                comps = np.argwhere((sums.max() / sums) < 5).flatten()
+                dense_cells = np.logical_and(np.isin(dense_cells, comps + 1), mask)
+
+        retval = np.zeros_like(dense_cells, dtype=int)
+        retval[dense_cells.astype(bool)] = 1
+
+        return retval
+
+    @staticmethod
+    def get_pyramidal_layer(tree, structure_name):
+        descendants = [tree.get_structures_by_id(i) for i in tree.descendant_ids([s['id'] for s in
+                                                                                  tree.get_structures_by_name(
+                                                                                      [structure_name])])]
+        descendants = [(i['name'], i['id']) for s in descendants for i in s if i['name'].find('pyramidal') > -1]
+        return descendants[0]
+
+    def process(self):
+        structure_data = np.load(f'{self.structdata_dir}/{self.experiment_id}/'
+                                 f'{self.experiment_id}-sections.npz')['arr_0']
+
+        dense_masks = defaultdict(dict)
+        heatmaps = defaultdict(dict)
+        celldata_structs = self.celldata[self.celldata.structure.isin(self.structures_including_pyramidal)]
+        relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
+
+        for structure in self.structures_including_pyramidal:
+            celldata_struct = celldata_structs.loc[self.celldata.structure == structure]
+            struct_id = np.unique(celldata_struct.structure_id.to_numpy())
+            mask = structure_data == struct_id
+
+            heatmaps[structure] = {s: self.create_heatmap(celldata_struct, s, 2) for s in relevant_sections}
+
+            for section, data in heatmaps[structure].items():
+                heatmap, _ = data
+                dense_masks[section][structure] = self.process_section(heatmap, mask[:, :, section])
+
+        dense_masks = {section: reduce(np.add, [m * self.pyramidal_layers[s][1] for s, m in dense_cells.items()])
+                       for section, dense_cells in dense_masks.items()}
+
+        for row in celldata_structs.itertuples():
+            struct = dense_masks[row.section][int(row.centroid_y // 64), int(row.centroid_x) // 64]
+            if struct != 0:
+                self.celldata.at[row.Index, self.column_name] = True
 
 
 class ExperimentCellsProcessor(object):
@@ -62,21 +157,36 @@ class ExperimentCellsProcessor(object):
         with open(f'{self.directory}/bboxes.pickle', 'rb') as f:
             bboxes = pickle.load(f)
         sections = sorted([s for s in bboxes.keys() if bboxes[s]])
-        section_data = list()
-        cell_data = list()
-        for section in sections:
-            cells, sec = self.process_section(section, bboxes[section])
-            section_data.append(sec)
-            cell_data += cells
 
-        csv = pandas.DataFrame(cell_data)
-        centroids = np.array([csv.centroid_x, csv.centroid_y]).swapaxes(0, 1).astype(np.int16)
-        densities = self.calculate_densities(centroids)
-        csv['density'] = np.array(densities)
+        if os.path.isfile(f'{self.directory}/celldata-{self.id}.csv') and os.path.isfile(f'{self.directory}/sectiondata-{self.id}.csv'):
+            csv = pandas.read_csv(f'{self.directory}/celldata-{self.id}.csv')
+        else:
+            section_data = list()
+            cell_data = list()
+            for section in sections:
+                cells, sec = self.process_section(section, bboxes[section])
+                section_data.append(sec)
+                cell_data += cells
+
+            csv = pandas.DataFrame(section_data)
+            csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
+            csv = pandas.DataFrame(cell_data)
+            centroids = np.array([csv.centroid_x, csv.centroid_y]).swapaxes(0, 1).astype(np.int16)
+            densities = self.calculate_densities(centroids)
+            csv['density'] = np.array(densities)
+
+        csv['pyramidal'] = False
+        csv['pyramidal_grid'] = False
+
+        self.logger.info(f"Extracting pyramidal layers for {self.id}...")
+        extractor = ExperimentPyramidalExtractor(self.id, self.directory, self.brain_seg_data_dir, csv,
+                                                 lambda c, d: max(c, d), self.mcc, 'pyramidal', self.logger)
+        extractor.process()
+        self.logger.info(f"Extracting grid-based pyramidal layers for {self.id}...")
+        extractor = ExperimentPyramidalExtractor(self.id, self.directory, self.brain_seg_data_dir, csv,
+                                                 lambda c, d: c + 1, self.mcc, 'pyramidal_grid', self.logger)
+        extractor.process()
         csv.to_csv(f'{self.directory}/celldata-{self.id}.csv')
-
-        csv = pandas.DataFrame(section_data)
-        csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
 
         csv = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
         csv.to_csv(f'{self.directory}/experimentdata-{self.id}.csv', index=False)
