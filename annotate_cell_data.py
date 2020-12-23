@@ -57,7 +57,6 @@ class ExperimentDataAnnotator(object):
         self.create_images()
         self.create_tiles(placer=self.place_heatmap, name='heatmaps', zoom=1, binsize=5)
         self.create_tiles(placer=self.place_patches, name='patches', zoom=4, gridsize=5)
-        sys.exit()
 
     def create_images(self):
         self.logger.info(f"Experiment {self.experiment_id}: Creating annotated images...")
