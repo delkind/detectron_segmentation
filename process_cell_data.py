@@ -1,117 +1,27 @@
-import argparse
 import ast
 import functools
 import operator as op
 import os
 import pickle
+import sys
 from collections import defaultdict
 from functools import reduce
 
-import numpy as np
 import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas
-from shapely.geometry import Polygon
 import scipy.ndimage as ndi
-
+import torch
+import torch.nn.functional as F
 from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+from shapely.geometry import Polygon
 from sklearn.cluster import KMeans
 
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
 from localize_brain import detect_brain
-
-
-class ExperimentPyramidalExtractor(object):
-    def __init__(self, experiment_id, directory, structdata_dir, celldata, method, mcc, column_name, logger):
-        self.column_name = column_name
-        self.method = method
-        self.logger = logger
-        self.structdata_dir = structdata_dir
-        self.directory = directory
-        self.experiment_id = experiment_id
-        tree = mcc.get_structure_tree()
-        self.structures_including_pyramidal = [f'Field CA{i}' for i in range(1, 4)]
-        self.pyramidal_layers = {s: self.get_pyramidal_layer(tree, s) for s in self.structures_including_pyramidal}
-        self.celldata = celldata
-
-    def create_heatmap(self, celldata_struct, section, binsize=1):
-        thumb = cv2.imread(f"{self.directory}/thumbnail-{self.experiment_id}-{section}.jpg",
-                           cv2.IMREAD_GRAYSCALE)
-        section_celldata = celldata_struct.loc[celldata_struct.section == section]
-        heatmap = np.zeros((thumb.shape[0] // binsize, thumb.shape[1] // binsize), dtype=int)
-        x = (section_celldata.centroid_x.to_numpy() // 64 // binsize).astype(int)
-        y = (section_celldata.centroid_y.to_numpy() // 64 // binsize).astype(int)
-        densities = (section_celldata.density.to_numpy()).astype(int)
-        for i in range(len(section_celldata)):
-            heatmap[y[i], x[i]] = self.method(heatmap[y[i], x[i]], densities[i])
-        heatmap = np.kron(heatmap, np.ones((binsize, binsize)))
-        return heatmap, thumb
-
-    @staticmethod
-    def process_section(heatmap, mask):
-        coords = np.where(heatmap != 0)
-        cells = heatmap[coords]
-        dense_cells = np.zeros_like(heatmap)
-        if cells.shape[0] > 2:
-            model = KMeans(n_clusters=2)
-            yhat = model.fit_predict(cells.reshape(-1, 1) ** 2)
-            clusters = np.unique(yhat).tolist()
-            if len(clusters) == 1:
-                yhat = np.zeros_like(cells)
-                dense = 1
-            else:
-                dense = np.argmax([cells[yhat == 0].mean(), cells[yhat == 1].mean()])
-
-            dense_cells[coords[0][(yhat == dense)], coords[1][(yhat == dense)]] = 1
-            dense_cells = ndi.binary_dilation(dense_cells, ndi.generate_binary_structure(2, 1), iterations=2)
-            dense_cells = ndi.binary_closing(dense_cells, ndi.generate_binary_structure(2, 1), iterations=2)
-            dense_cells, comps = ndi.measurements.label(dense_cells)
-            if comps > 0:
-                sums = np.array([(dense_cells == i + 1).sum() for i in range(comps)])
-                comps = np.argwhere((sums.max() / sums) < 5).flatten()
-                dense_cells = np.logical_and(np.isin(dense_cells, comps + 1), mask)
-
-        retval = np.zeros_like(dense_cells, dtype=int)
-        retval[dense_cells.astype(bool)] = 1
-
-        return retval
-
-    @staticmethod
-    def get_pyramidal_layer(tree, structure_name):
-        descendants = [tree.get_structures_by_id(i) for i in tree.descendant_ids([s['id'] for s in
-                                                                                  tree.get_structures_by_name(
-                                                                                      [structure_name])])]
-        descendants = [(i['name'], i['id']) for s in descendants for i in s if i['name'].find('pyramidal') > -1]
-        return descendants[0]
-
-    def process(self):
-        structure_data = np.load(f'{self.structdata_dir}/{self.experiment_id}/'
-                                 f'{self.experiment_id}-sections.npz')['arr_0']
-
-        dense_masks = defaultdict(dict)
-        heatmaps = defaultdict(dict)
-        celldata_structs = self.celldata[self.celldata.structure.isin(self.structures_including_pyramidal)]
-        relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
-
-        for structure in self.structures_including_pyramidal:
-            celldata_struct = celldata_structs.loc[self.celldata.structure == structure]
-            struct_id = np.unique(celldata_struct.structure_id.to_numpy())
-            mask = structure_data == struct_id
-
-            heatmaps[structure] = {s: self.create_heatmap(celldata_struct, s, 2) for s in relevant_sections}
-
-            for section, data in heatmaps[structure].items():
-                heatmap, _ = data
-                dense_masks[section][structure] = self.process_section(heatmap, mask[:, :, section])
-
-        dense_masks = {section: reduce(np.add, [m * self.pyramidal_layers[s][1] for s, m in dense_cells.items()])
-                       for section, dense_cells in dense_masks.items()}
-
-        for row in celldata_structs.itertuples():
-            struct = dense_masks[row.section][int(row.centroid_y // 64), int(row.centroid_x) // 64]
-            if struct != 0:
-                self.celldata.at[row.Index, self.column_name] = True
 
 
 class ExperimentCellsProcessor(object):
@@ -131,6 +41,9 @@ class ExperimentCellsProcessor(object):
         self.seg_data = np.load(f'{self.brain_seg_data_dir}/{self.id}/{self.id}-sections.npz')['arr_0']
         self.structure_tree = self.mcc.get_structure_tree()
         self.structure_ids = self.get_structure_children()
+        with open(f'{self.directory}/bboxes.pickle', "rb") as f:
+            bboxes = pickle.load(f)
+        self.bboxes = {k: v for k, v in bboxes.items() if v}
 
     def get_structure_children(self):
         structure_ids = self.structure_tree.descendant_ids(self.parent_struct_id)
@@ -139,53 +52,120 @@ class ExperimentCellsProcessor(object):
 
     def get_structure_mask(self, section):
         section_seg_data = self.seg_data[:, :, section]
-        mask = np.zeros_like(section_seg_data, dtype=np.int8)
-        for stid in self.structure_ids:
-            mask[section_seg_data == stid] = True
+        mask = np.isin(section_seg_data, self.structure_ids)
         mask = ndi.binary_closing(ndi.binary_fill_holes(mask).astype(np.int8)).astype(np.int8)
         return mask
 
-    @staticmethod
-    def calculate_densities(centroids, radius=84):
-        densities = np.zeros(centroids.shape[0], dtype=np.int16)
-        for i in range(centroids.shape[0]):
-            dists = np.max(np.abs(centroids - centroids[i, :]), axis=1) < radius
-            densities[i] = dists.sum()
-        return densities
+    def create_heatmap(self, section, bboxes):
+        heatmap = np.zeros((self.seg_data.shape[0] * 64, self.seg_data.shape[1] * 64), dtype=np.int16)
+        for bbox in bboxes.get(section, []):
+            x, y, w, h = bbox.scale(64)
+            cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png',
+                                  cv2.IMREAD_GRAYSCALE)
+            cnts, _ = cv2.findContours(cellmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            new_img = np.zeros_like(cellmask)
+            new_img = cv2.fillPoly(new_img, cnts, color=1)
+            heatmap[y: y + cellmask.shape[0], x: x + cellmask.shape[1]] = new_img
+
+        heatmap = torch.tensor(np.expand_dims(heatmap, axis=(0, 1)))
+        kernel = torch.tensor(np.expand_dims(np.tile(np.ones((64,), dtype=np.int16).reshape(-1, 1), 64), axis=(0, 1)))
+        heatmap = F.conv2d(heatmap, kernel, stride=64, padding=0).numpy().squeeze()
+        return heatmap
+
+    def calculate_densities(self, csv):
+        if os.path.isfile(f'{self.directory}/heatmaps.npz'):
+            heatmaps = np.load(f'{self.directory}/heatmaps.npz')['arr_0']
+        else:
+            heatmaps = [self.create_heatmap(s, self.bboxes) for s in range(min(self.bboxes.keys()),
+                                                                           max(self.bboxes.keys()) + 1)]
+            heatmaps = np.stack(heatmaps, axis=2)
+            np.savez_compressed(f'{self.directory}/heatmaps.npz', heatmaps, allow_pickle=True)
+
+        csv['density'] = 0
+
+        centroids_x = (csv.centroid_x.to_numpy() // 64).astype(int)
+        centroids_y = (csv.centroid_y.to_numpy() // 64).astype(int)
+        sections = csv.section.to_numpy() - min(self.bboxes.keys())
+        densities = heatmaps[centroids_y, centroids_x, sections] / 4096
+        csv['density'] = densities
+
+    def detect_pyramidal(self, csv):
+        structures_including_pyramidal = [f'Field CA{i}' for i in range(1, 4)]
+        dense_masks = defaultdict(dict)
+        celldata_structs = csv[csv.structure.isin(structures_including_pyramidal)]
+        relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
+
+        for structure in structures_including_pyramidal:
+            celldata_struct = celldata_structs.loc[csv.structure == structure]
+
+            for section in relevant_sections:
+                celldata_section = celldata_struct[celldata_struct.section == section]
+                centroids_x = (celldata_section.centroid_x.to_numpy() // 64).astype(int)
+                centroids_y = (celldata_section.centroid_y.to_numpy() // 64).astype(int)
+                densities = celldata_section.density.to_numpy()
+                dense_mask = np.zeros_like(self.seg_data[:, :, section])
+                if densities.shape[0] > 2:
+                    model = KMeans(n_clusters=2)
+                    yhat = model.fit_predict(densities.reshape(-1, 1))
+                    clusters = np.unique(yhat).tolist()
+                    if len(clusters) == 1:
+                        yhat = np.zeros_like(densities)
+                        dense = 1
+                    else:
+                        dense = np.argmax([densities[yhat == 0].mean(), densities[yhat == 1].mean()])
+
+                    # border = np.percentile(densities, 50)
+                    dense_mask[centroids_y[yhat == dense], centroids_x[yhat == dense]] = 1
+                    dense_mask = ndi.binary_closing(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
+                    dense_mask, comps = ndi.measurements.label(dense_mask)
+                    if comps > 0:
+                        sums = np.array([(dense_mask == i + 1).sum() for i in range(comps)])
+                        comps = np.argwhere((sums > 10) & ((sums.max() / sums) < 5)).flatten()
+                        dense_mask = np.isin(dense_mask, comps + 1)
+                    else:
+                        dense_mask = np.zeros_like(self.seg_data[:, :, section])
+
+                dense_masks[section][structure] = dense_mask
+
+        dense_masks = {section: reduce(np.add, [m for s, m in dense_cells.items()])
+                       for section, dense_cells in dense_masks.items()}
+
+        for section, mask in dense_masks.items():
+            fig, axs = plt.subplots(1, 2)
+            fig.suptitle(f"Section {section}")
+            axs[0].imshow(mask, cmap='gray')
+            axs[1].imshow(mask, cmap='hot')
+            plt.show()
+
+        for row in celldata_structs.itertuples():
+            struct = dense_masks[row.section][int(row.centroid_y // 64), int(row.centroid_x) // 64]
+            if struct != 0:
+                csv.at[row.Index, 'pyramidal'] = True
 
     def process(self):
-        with open(f'{self.directory}/bboxes.pickle', 'rb') as f:
-            bboxes = pickle.load(f)
-        sections = sorted([s for s in bboxes.keys() if bboxes[s]])
+        sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
 
         if os.path.isfile(f'{self.directory}/celldata-{self.id}.csv') and os.path.isfile(f'{self.directory}/sectiondata-{self.id}.csv'):
             csv = pandas.read_csv(f'{self.directory}/celldata-{self.id}.csv')
+            labels_to_remove = [c for c in csv if c.startswith('Unnamed')
+                                or c.startswith('pyramidal') or c == 'density']
+            csv = csv.drop(columns=labels_to_remove)
         else:
             section_data = list()
             cell_data = list()
             for section in sections:
-                cells, sec = self.process_section(section, bboxes[section])
+                cells, sec = self.process_section(section)
                 section_data.append(sec)
                 cell_data += cells
 
             csv = pandas.DataFrame(section_data)
             csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
             csv = pandas.DataFrame(cell_data)
-            centroids = np.array([csv.centroid_x, csv.centroid_y]).swapaxes(0, 1).astype(np.int16)
-            densities = self.calculate_densities(centroids)
-            csv['density'] = np.array(densities)
 
-        csv['pyramidal'] = False
-        csv['pyramidal_grid'] = False
-
+        self.calculate_densities(csv)
         self.logger.info(f"Extracting pyramidal layers for {self.id}...")
-        extractor = ExperimentPyramidalExtractor(self.id, self.directory, self.brain_seg_data_dir, csv,
-                                                 lambda c, d: max(c, d), self.mcc, 'pyramidal', self.logger)
-        extractor.process()
-        self.logger.info(f"Extracting grid-based pyramidal layers for {self.id}...")
-        extractor = ExperimentPyramidalExtractor(self.id, self.directory, self.brain_seg_data_dir, csv,
-                                                 lambda c, d: c + 1, self.mcc, 'pyramidal_grid', self.logger)
-        extractor.process()
+        csv['pyramidal'] = False
+        self.detect_pyramidal(csv)
         csv.to_csv(f'{self.directory}/celldata-{self.id}.csv')
 
         csv = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
@@ -208,7 +188,7 @@ class ExperimentCellsProcessor(object):
         brain_area = sum([Polygon(ctr.squeeze()).area for ctr in ctrs])
         return brain_area
 
-    def process_section(self, section, bboxes):
+    def process_section(self, section):
         brain_area = self.get_brain_area(section)
         struct_mask = self.get_structure_mask(section)
 
@@ -217,7 +197,7 @@ class ExperimentCellsProcessor(object):
 
         cells_data = list()
 
-        for offset_x, offset_y, w, h in map(lambda b: b.scale(64), bboxes):
+        for offset_x, offset_y, w, h in map(lambda b: b.scale(64), self.bboxes[section]):
             cells = self.get_cell_mask(section, offset_x, offset_y, w, h, struct_mask)
             for cell in cells:
                 struct_id = self.get_struct_id(cell, section)
@@ -299,6 +279,7 @@ class CellProcessor(DirWatcher):
                                               self.experiments[item],
                                               self.logger)
         experiment.process()
+        sys.exit()
 
 
 class ExperimentCellAnalyzerTaskManager(ExperimentProcessTaskManager):

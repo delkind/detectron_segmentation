@@ -21,12 +21,12 @@ class TaskManager(ABC):
 
         print(self.args)
         args = {k: v for k, v in self.args.items() if k != 'processors'}
-        if 'processors' in self.args and self.args['processors'] is not None:
+        if 'processors' in self.args and self.args['processors'] is not None and self.args['processors'] != 1:
             num_processors = self.args['processors']
             self.prepare_input(**args)
             self.spawn_processors(num_processors)
         else:
-            self.process_number = self.args['_processor_number']
+            self.process_number = self.args['_processor_number'] if self.args['_processor_number'] is not None else 0
             self.execute_task(**args)
 
     @abstractmethod
