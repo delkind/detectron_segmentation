@@ -143,8 +143,8 @@ class ExperimentCellsProcessor(object):
                 csv.at[row.Index, 'pyramidal'] = True
 
     def process(self):
+        self.logger.info(f"Extracting cell data for {self.id}...")
         sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
-
         if os.path.isfile(f'{self.directory}/celldata-{self.id}.csv') and os.path.isfile(f'{self.directory}/sectiondata-{self.id}.csv'):
             csv = pandas.read_csv(f'{self.directory}/celldata-{self.id}.csv')
             labels_to_remove = [c for c in csv if c.startswith('Unnamed')
@@ -162,6 +162,7 @@ class ExperimentCellsProcessor(object):
             csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
             csv = pandas.DataFrame(cell_data)
 
+        self.logger.info(f"Calculating densities for {self.id}...")
         self.calculate_densities(csv)
         self.logger.info(f"Extracting pyramidal layers for {self.id}...")
         csv['pyramidal'] = False
