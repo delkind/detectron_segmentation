@@ -8,7 +8,6 @@ from collections import defaultdict
 from functools import reduce
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas
 import scipy.ndimage as ndi
@@ -130,12 +129,12 @@ class ExperimentCellsProcessor(object):
         dense_masks = {section: reduce(np.add, [m for s, m in dense_cells.items()])
                        for section, dense_cells in dense_masks.items()}
 
-        for section, mask in dense_masks.items():
-            fig, axs = plt.subplots(1, 2)
-            fig.suptitle(f"Section {section}")
-            axs[0].imshow(mask, cmap='gray')
-            axs[1].imshow(mask, cmap='hot')
-            plt.show()
+        # for section, mask in dense_masks.items():
+        #     fig, axs = plt.subplots(1, 2)
+        #     fig.suptitle(f"Section {section}")
+        #     axs[0].imshow(mask, cmap='gray')
+        #     axs[1].imshow(mask, cmap='hot')
+        #     plt.show()
 
         for row in celldata_structs.itertuples():
             struct = dense_masks[row.section][int(row.centroid_y // 64), int(row.centroid_x) // 64]
