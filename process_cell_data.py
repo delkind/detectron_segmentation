@@ -279,7 +279,6 @@ class CellProcessor(DirWatcher):
                                               self.experiments[item],
                                               self.logger)
         experiment.process()
-        sys.exit()
 
 
 class ExperimentCellAnalyzerTaskManager(ExperimentProcessTaskManager):
