@@ -2,6 +2,7 @@ import ast
 import math
 import os
 import pickle
+import sys
 
 import cv2
 import matplotlib
@@ -13,6 +14,7 @@ from matplotlib.collections import PatchCollection
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Circle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from shapely.geometry import Polygon
 
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
@@ -26,7 +28,7 @@ class ExperimentDataAnnotator(object):
         with open(f'{self.directory}/bboxes.pickle', "rb") as f:
             bboxes = pickle.load(f)
         self.bboxes = {k: v for k, v in bboxes.items() if v}
-        self.celldata = pd.read_csv(f'{self.directory}/pyr_celldata_cell-{self.experiment_id}.csv')
+        self.celldata = pd.read_csv(f'{self.directory}/celldata-{self.experiment_id}.csv')
         self.tile_dim = int(math.ceil(math.sqrt(len(self.bboxes))))
 
     @staticmethod
@@ -52,9 +54,10 @@ class ExperimentDataAnnotator(object):
         return mycmap
 
     def process(self):
-        # self.create_images()
+        self.create_images()
         self.create_tiles(placer=self.place_heatmap, name='heatmaps', zoom=1, binsize=5)
         self.create_tiles(placer=self.place_patches, name='patches', zoom=4, gridsize=5)
+        sys.exit()
 
     def create_images(self):
         self.logger.info(f"Experiment {self.experiment_id}: Creating annotated images...")
@@ -62,9 +65,16 @@ class ExperimentDataAnnotator(object):
             self.create_section_image(section)
 
     def create_section_image(self, section):
+        section_celldata = self.celldata[self.celldata.section == section]
+        coords = (np.stack((section_celldata.centroid_x.to_numpy() // 64,
+                            section_celldata.centroid_y.to_numpy() // 64,
+                            section_celldata.pyramidal.to_numpy() * 1)).swapaxes(0, 1)).astype(int)
+        coords = list(zip(*list(zip(*coords.tolist()))))
+        coords = {(x, y): v for x, y, v in coords}
         thumb = cv2.imread(f"{self.directory}/thumbnail-{self.experiment_id}-{section}.jpg", cv2.IMREAD_GRAYSCALE)
         thumb = cv2.resize(thumb, (0, 0), fx=16, fy=16)
         thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
+        colors = [(0, 255, 0), (0, 255, 255)]
         for bbox in self.bboxes[section]:
             x, y, w, h = bbox.scale(64)
             image = cv2.imread(f'{self.directory}/full-{self.experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
@@ -73,9 +83,17 @@ class ExperimentDataAnnotator(object):
                               cv2.IMREAD_GRAYSCALE)
             image = cv2.resize(image, (0, 0), fx=0.25, fy=0.25)
             cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cnts = [cnt.squeeze() // 4 for cnt in cnts if cnt.shape[0] > 2]
+            new_img = np.zeros_like(mask)
+            new_img = cv2.fillPoly(new_img, cnts, color=255)
+            cnts, _ = cv2.findContours(new_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cnts = [cnt for cnt in cnts if cnt.shape[0] > 2]
+            polygons = [Polygon((cnt.squeeze() + np.array([x, y])) // 64).centroid for cnt in cnts]
+            polygons = [(int(p.x), int(p.y)) for p in polygons]
+            cnts = [[cnt.squeeze() // 4 for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == p]
+                    for p in range(2)]
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            cv2.polylines(image, cnts, color=(0, 255, 0), thickness=1, isClosed=True)
+            for p in range(2):
+                cv2.polylines(image, cnts[p], color=colors[p], thickness=1, isClosed=True)
             thumb[y // 4: y // 4 + image.shape[0], x // 4: x // 4 + image.shape[1], :] = image
         cv2.imwrite(f"{self.directory}/annotated-{self.experiment_id}-{section}.jpg", thumb)
 
@@ -94,7 +112,7 @@ class ExperimentDataAnnotator(object):
             self.decorate_section(ax, fig, labels, p)
 
         self.logger.info(f"Experiment {self.experiment_id}: Saving {name}...")
-        plt.savefig(f"{self.directory}/{name}_cell-{self.experiment_id}.pdf", dpi=2400)
+        plt.savefig(f"{self.directory}/{name}-{self.experiment_id}.pdf", dpi=2400)
         plt.close()
 
     def process_section(self, ax, kwargs, placer, section, zoom):
@@ -115,14 +133,14 @@ class ExperimentDataAnnotator(object):
             bar.ax.set_yticklabels(labels)
 
     @staticmethod
-    def place_patches(ax, thumb, gridsize, section_celldata, zoom, radius=3):
+    def place_patches(ax, thumb, gridsize, section_celldata, zoom, radius=3, colname='pyramidal'):
         ax.imshow(thumb)
-        structs = np.unique(section_celldata.structure_id.to_numpy()).tolist()
-        struct_counts = {s: len(section_celldata[section_celldata.structure_id == s]) for s in structs}
+        structs = np.unique(section_celldata.structure_id.to_numpy() + section_celldata[colname].to_numpy()).tolist()
+        struct_counts = {s: len(section_celldata[(section_celldata.structure_id + section_celldata[colname]) == s]) for s in structs}
         cmap = ListedColormap(ExperimentDataAnnotator.generate_colormap(len(structs)))
         coords = np.stack((section_celldata.centroid_x.to_numpy() / (64 / zoom * gridsize),
                            section_celldata.centroid_y.to_numpy() / (64 / zoom * gridsize),
-                           section_celldata.structure_id.to_numpy())).astype(int).tolist()
+                           section_celldata.structure_id.to_numpy() + section_celldata[colname].to_numpy())).astype(int).tolist()
         coords = sorted(list({(x, y, s) for x, y, s in zip(*coords)}), key=lambda t: struct_counts[t[2]], reverse=True)
         patches = [Circle((x * gridsize, y * gridsize), radius) for x, y, _ in coords]
         colors = [c for _, _, c in coords]
@@ -134,13 +152,10 @@ class ExperimentDataAnnotator(object):
 
     @staticmethod
     def place_heatmap(ax, thumb, section_celldata, zoom, binsize):
-        heatmap = np.zeros((thumb.size[1] // binsize, thumb.size[0] // binsize), dtype=int)
-        x = (section_celldata.centroid_x.to_numpy() // (64 // zoom * binsize)).astype(int)
-        y = (section_celldata.centroid_y.to_numpy() // (64 // zoom * binsize)).astype(int)
-        for i in range(len(section_celldata)):
-            heatmap[y[i], x[i]] += 1
-        heatmap = np.kron(heatmap, np.ones((binsize, binsize)))
-        thumb.resize((heatmap.shape[1], heatmap.shape[0]))
+        heatmap = np.zeros((thumb.size[1], thumb.size[0]), dtype=float)
+        x = (section_celldata.centroid_x.to_numpy() // 64).astype(int)
+        y = (section_celldata.centroid_y.to_numpy() // 64).astype(int)
+        heatmap[y, x] = section_celldata.density.to_numpy()
         ax.imshow(thumb)
         ax.imshow(heatmap, cmap=ExperimentDataAnnotator.transparent_cmap(plt.get_cmap('hot')))
         return {}, matplotlib.cm.ScalarMappable(
@@ -172,6 +187,7 @@ class ExperimentCellAnalyzerTaskManager(ExperimentProcessTaskManager):
     def execute_task(self, structs, structure_map_dir, **kwargs):
         analyzer = CellProcessor(structs=ast.literal_eval(structs), structure_map_dir=structure_map_dir, **kwargs)
         experiments = os.listdir(structure_map_dir)
+        # analyzer.run_until_count(len(experiments))
         analyzer.run_until_count(len(experiments))
 
 
