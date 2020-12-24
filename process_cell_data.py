@@ -3,7 +3,6 @@ import functools
 import operator as op
 import os
 import pickle
-import sys
 from collections import defaultdict
 from functools import reduce
 
@@ -11,8 +10,6 @@ import cv2
 import numpy as np
 import pandas
 import scipy.ndimage as ndi
-import torch
-import torch.nn.functional as F
 from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from shapely.geometry import Polygon
@@ -55,38 +52,26 @@ class ExperimentCellsProcessor(object):
         mask = ndi.binary_closing(ndi.binary_fill_holes(mask).astype(np.int8)).astype(np.int8)
         return mask
 
-    def create_heatmap(self, section, bboxes):
-        heatmap = np.zeros((self.seg_data.shape[0] * 64, self.seg_data.shape[1] * 64), dtype=np.int16)
-        for bbox in bboxes.get(section, []):
-            x, y, w, h = bbox.scale(64)
-            cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png',
-                                  cv2.IMREAD_GRAYSCALE)
-            cnts, _ = cv2.findContours(cellmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            new_img = np.zeros_like(cellmask)
-            new_img = cv2.fillPoly(new_img, cnts, color=1)
-            heatmap[y: y + cellmask.shape[0], x: x + cellmask.shape[1]] = new_img
-
-        heatmap = torch.tensor(np.expand_dims(heatmap, axis=(0, 1)))
-        kernel = torch.tensor(np.expand_dims(np.tile(np.ones((64,), dtype=np.int16).reshape(-1, 1), 64), axis=(0, 1)))
-        heatmap = F.conv2d(heatmap, kernel, stride=64, padding=0).numpy().squeeze()
-        return heatmap
-
     def calculate_densities(self, csv):
-        if os.path.isfile(f'{self.directory}/heatmaps.npz'):
-            heatmaps = np.load(f'{self.directory}/heatmaps.npz')['arr_0']
-        else:
-            heatmaps = [self.create_heatmap(s, self.bboxes) for s in range(min(self.bboxes.keys()),
-                                                                           max(self.bboxes.keys()) + 1)]
-            heatmaps = np.stack(heatmaps, axis=2)
-            np.savez_compressed(f'{self.directory}/heatmaps.npz', heatmaps, allow_pickle=True)
-
         csv['density'] = 0
+        for section in sorted(np.unique(csv.section)):
+            csv_section = csv[csv.section == section]
+            self.logger.debug(f"Creating heatmap experiment {self.id} section {section}")
+            image = np.zeros((self.seg_data.shape[0] * 64, self.seg_data.shape[1] * 64), dtype=np.int16)
+            for bbox in self.bboxes.get(section, []):
+                x, y, w, h = bbox.scale(64)
+                cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png',
+                                      cv2.IMREAD_GRAYSCALE)
+                cnts, _ = cv2.findContours(cellmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                new_img = np.zeros_like(cellmask)
+                new_img = cv2.fillPoly(new_img, cnts, color=1)
+                image[y: y + cellmask.shape[0], x: x + cellmask.shape[1]] = new_img
 
-        centroids_x = (csv.centroid_x.to_numpy() // 64).astype(int)
-        centroids_y = (csv.centroid_y.to_numpy() // 64).astype(int)
-        sections = csv.section.to_numpy() - min(self.bboxes.keys())
-        densities = heatmaps[centroids_y, centroids_x, sections] / 4096
-        csv['density'] = densities
+            centroids_y = csv_section.centroid_y.to_numpy().astype(int)
+            centroids_x = csv_section.centroid_x.to_numpy().astype(int)
+            densities = np.array([image[centroids_y[i] - 32: centroids_y[i] + 32,
+                                  centroids_x[i] - 32: centroids_x[i] + 32].sum() for i in range(len(centroids_y))])
+            csv.loc[csv.section == section, 'density'] = densities / 4096
 
     def detect_pyramidal(self, csv):
         structures_including_pyramidal = [f'Field CA{i}' for i in range(1, 4)]
@@ -103,6 +88,7 @@ class ExperimentCellsProcessor(object):
                 centroids_y = (celldata_section.centroid_y.to_numpy() // 64).astype(int)
                 densities = celldata_section.density.to_numpy()
                 dense_mask = np.zeros_like(self.seg_data[:, :, section])
+
                 if densities.shape[0] > 2:
                     model = KMeans(n_clusters=2)
                     yhat = model.fit_predict(densities.reshape(-1, 1))
@@ -129,11 +115,19 @@ class ExperimentCellsProcessor(object):
         dense_masks = {section: reduce(np.add, [m for s, m in dense_cells.items()])
                        for section, dense_cells in dense_masks.items()}
 
+        # heatmaps = dict()
+        # for section in relevant_sections:
+        #     heatmaps[section] = np.zeros_like(self.seg_data[:, :, section], dtype=float)
+        #     heatmaps[section][csv[csv.section == section].centroid_y.to_numpy().astype(int) // 64,
+        #                       csv[csv.section == section].centroid_x.to_numpy().astype(int) // 64] = \
+        #         csv[csv.section == section].density
+        #
+        # import matplotlib.pyplot as plt
         # for section, mask in dense_masks.items():
         #     fig, axs = plt.subplots(1, 2)
         #     fig.suptitle(f"Section {section}")
         #     axs[0].imshow(mask, cmap='gray')
-        #     axs[1].imshow(mask, cmap='hot')
+        #     axs[1].imshow(heatmaps.get(section, mask), cmap='hot')
         #     plt.show()
 
         for row in celldata_structs.itertuples():
