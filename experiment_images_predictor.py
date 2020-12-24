@@ -1,5 +1,6 @@
 import argparse
 import ast
+import itertools
 import os
 import pickle
 import re
@@ -11,10 +12,43 @@ from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 from detectron2.model_zoo import model_zoo
+from detectron2.utils.visualizer import GenericMask
 
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
-from predict_experiment import create_crops_list, extract_predictions
+
+
+def extract_predictions(predictions):
+    if not predictions.has('pred_masks'):
+        return None, None
+
+    masks = np.asarray(predictions.pred_masks)
+    if masks.shape[0] == 0:
+        return None, None
+
+    mask = np.zeros_like(masks[0, :, :])
+    for m in masks:
+        mask |= m
+
+    masks = [GenericMask(m, m.shape[0], m.shape[1]) for m in masks]
+
+    polygons = [poly.reshape(-1, 2) for mask in masks for poly in mask.polygons]
+    return polygons, mask
+
+
+def create_crops_list(border_size, crop_size, image):
+    crop_coords = create_crops_coords_list(crop_size, border_size, image)
+    crops = [image[i:i + crop_size, j:j + crop_size, ...] for (i, j) in crop_coords]
+    return list(zip(crops, crop_coords))
+
+
+def create_crops_coords_list(crop_size, border_size, image):
+    vert = list(range(0, image.shape[0], crop_size - 2 * border_size))
+    horiz = list(range(0, image.shape[1], crop_size - 2 * border_size))
+    vert = list(filter(lambda v: v + crop_size <= image.shape[0], vert)) + [image.shape[0] - crop_size]
+    horiz = list(filter(lambda v: v + crop_size <= image.shape[1], horiz)) + [image.shape[1] - crop_size]
+    crop_coords = list(itertools.product(vert, horiz))
+    return crop_coords
 
 
 class ExperimentImagesPredictor(DirWatcher):
