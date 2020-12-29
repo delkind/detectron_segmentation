@@ -124,7 +124,7 @@ class ExperimentCellsProcessor(object):
         celldata_struct = csv[csv.structure_id.isin(dg_structs)]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
         dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
-                                max(relevant_sections) - min(relevant_sections) + 1))
+                                max(relevant_sections) - min(relevant_sections) + 1), dtype=int)
 
         self.build_dense_masks(celldata_struct, dense_masks, relevant_sections)
         # self.plot_density_masks(csv, dense_masks, relevant_sections)
@@ -133,7 +133,7 @@ class ExperimentCellsProcessor(object):
         centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // 64
         sections = celldata_struct.section.to_numpy().astype(int)
         csv.loc[csv.structure_id.isin(dg_structs), 'pyramidal'] = \
-            dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)]
+            dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
 
         csv.loc[csv.structure_id.isin([10703, 10704]) & csv.pyramidal, 'structure'] = \
             self.structure_tree.get_name_map()[632]
@@ -161,7 +161,7 @@ class ExperimentCellsProcessor(object):
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
         dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
                                 max(relevant_sections) - min(relevant_sections) + 1,
-                                len(structures_including_pyramidal)))
+                                len(structures_including_pyramidal)), dtype=int)
 
         for ofs, structure in enumerate(structures_including_pyramidal):
             celldata_struct = celldata_structs.loc[csv.structure == structure]
@@ -174,7 +174,7 @@ class ExperimentCellsProcessor(object):
         centroids_x = celldata_structs.centroid_x.to_numpy().astype(int) // 64
         sections = celldata_structs.section.to_numpy().astype(int)
         csv.loc[csv.structure.isin(structures_including_pyramidal), 'pyramidal'] = \
-            dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)]
+            dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
 
     def process(self):
         self.logger.info(f"Extracting cell data for {self.id}...")
