@@ -19,6 +19,33 @@ from shapely.geometry import Polygon
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
 
+unique_colors = [
+    (255, 0, 0)[::-1],
+    (255, 255, 0)[::-1],
+    (0, 234, 255)[::-1],
+    (170, 0, 255)[::-1],
+    (255, 127, 0)[::-1],
+    (191, 255, 0)[::-1],
+    (0, 149, 255)[::-1],
+    (255, 0, 170)[::-1],
+    (255, 212, 0)[::-1],
+    (106, 255, 0)[::-1],
+    (0, 64, 255)[::-1],
+    (237, 185, 185)[::-1],
+    (185, 215, 237)[::-1],
+    (231, 233, 185)[::-1],
+    (220, 185, 237)[::-1],
+    (185, 237, 224)[::-1],
+    (143, 35, 35)[::-1],
+    (35, 98, 143)[::-1],
+    (143, 106, 35)[::-1],
+    (107, 35, 143)[::-1],
+    (79, 143, 35)[::-1],
+    (0, 0, 0)[::-1],
+    (115, 115, 115)[::-1],
+    (204, 204, 204)[::-1],
+]
+
 
 class ExperimentDataAnnotator(object):
     def __init__(self, experiment_id, directory, logger):
@@ -65,15 +92,21 @@ class ExperimentDataAnnotator(object):
 
     def create_section_image(self, section):
         section_celldata = self.celldata[self.celldata.section == section]
+        section_numbers = section_celldata.structure_id.to_numpy()
+        section_modifiers = -(section_celldata.pyramidal.to_numpy().astype(int))
+        section_modifiers[section_modifiers == 0] = 1
+        section_numbers *= section_modifiers
         coords = (np.stack((section_celldata.centroid_x.to_numpy() // 64,
                             section_celldata.centroid_y.to_numpy() // 64,
-                            section_celldata.pyramidal.to_numpy() * 1)).swapaxes(0, 1)).astype(int)
+                            section_numbers)).swapaxes(0, 1)).astype(int)
         coords = list(zip(*list(zip(*coords.tolist()))))
         coords = {(x, y): v for x, y, v in coords}
+        unique_numbers = np.unique(section_numbers).tolist()
+        colors = {v: unique_colors[i % len(unique_colors)] for i, v in enumerate(unique_numbers)}
+
         thumb = cv2.imread(f"{self.directory}/thumbnail-{self.experiment_id}-{section}.jpg", cv2.IMREAD_GRAYSCALE)
         thumb = cv2.resize(thumb, (0, 0), fx=16, fy=16)
         thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
-        colors = [(0, 255, 0), (0, 255, 255)]
         for bbox in self.bboxes[section]:
             x, y, w, h = bbox.scale(64)
             image = cv2.imread(f'{self.directory}/full-{self.experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
@@ -88,10 +121,10 @@ class ExperimentDataAnnotator(object):
             cnts = [cnt for cnt in cnts if cnt.shape[0] > 2]
             polygons = [Polygon((cnt.squeeze() + np.array([x, y])) // 64).centroid for cnt in cnts]
             polygons = [(int(p.x), int(p.y)) for p in polygons]
-            cnts = [[cnt.squeeze() // 4 for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == p]
-                    for p in range(2)]
+            cnts = {v: [cnt.squeeze() // 4 for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == v]
+                    for v in unique_numbers}
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            for p in range(2):
+            for p in unique_numbers:
                 cv2.polylines(image, cnts[p], color=colors[p], thickness=1, isClosed=True)
             thumb[y // 4: y // 4 + image.shape[0], x // 4: x // 4 + image.shape[1], :] = image
         cv2.imwrite(f"{self.directory}/annotated-{self.experiment_id}-{section}.jpg", thumb)
@@ -135,11 +168,13 @@ class ExperimentDataAnnotator(object):
     def place_patches(ax, thumb, gridsize, section_celldata, zoom, radius=3, colname='pyramidal'):
         ax.imshow(thumb)
         structs = np.unique(section_celldata.structure_id.to_numpy() + section_celldata[colname].to_numpy()).tolist()
-        struct_counts = {s: len(section_celldata[(section_celldata.structure_id + section_celldata[colname]) == s]) for s in structs}
+        struct_counts = {s: len(section_celldata[(section_celldata.structure_id + section_celldata[colname]) == s]) for
+                         s in structs}
         cmap = ListedColormap(ExperimentDataAnnotator.generate_colormap(len(structs)))
         coords = np.stack((section_celldata.centroid_x.to_numpy() / (64 / zoom * gridsize),
                            section_celldata.centroid_y.to_numpy() / (64 / zoom * gridsize),
-                           section_celldata.structure_id.to_numpy() + section_celldata[colname].to_numpy())).astype(int).tolist()
+                           section_celldata.structure_id.to_numpy() + section_celldata[colname].to_numpy())).astype(
+            int).tolist()
         coords = sorted(list({(x, y, s) for x, y, s in zip(*coords)}), key=lambda t: struct_counts[t[2]], reverse=True)
         patches = [Circle((x * gridsize, y * gridsize), radius) for x, y, _ in coords]
         colors = [c for _, _, c in coords]

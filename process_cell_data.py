@@ -1,5 +1,7 @@
+import argparse
 import ast
 import functools
+import math
 import operator as op
 import os
 import pickle
@@ -14,6 +16,7 @@ from shapely.geometry import Polygon
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier
 
+from annotate_cell_data import ExperimentDataAnnotator
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
 from localize_brain import detect_brain
@@ -73,10 +76,11 @@ class ExperimentCellsProcessor(object):
             csv.loc[csv.section == section, 'density'] = densities / 4096
 
     def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
+        scale = 64 // (dense_masks.shape[0] // self.seg_data.shape[0])
         for section in relevant_sections:
             celldata_section = celldata_struct[celldata_struct.section == section]
-            centroids_x = (celldata_section.centroid_x.to_numpy() // 64).astype(int)
-            centroids_y = (celldata_section.centroid_y.to_numpy() // 64).astype(int)
+            centroids_x = (celldata_section.centroid_x.to_numpy() // scale).astype(int)
+            centroids_y = (celldata_section.centroid_y.to_numpy() // scale).astype(int)
             densities = celldata_section.density.to_numpy()
 
             if densities.shape[0] > 2:
@@ -88,20 +92,39 @@ class ExperimentCellsProcessor(object):
                     dense = 1
                 else:
                     dense = np.argmax([densities[yhat == 0].mean(), densities[yhat == 1].mean()])
-
-                # border = np.percentile(densities, 50)
-                dense_mask = np.zeros_like(self.seg_data[:, :, 0])
-                dense_mask[centroids_y[yhat == dense], centroids_x[yhat == dense]] = 1
-                dense_mask = ndi.binary_closing(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
-                dense_mask, comps = ndi.measurements.label(dense_mask)
-                if comps > 0:
-                    sums = np.array([(dense_mask == i + 1).sum() for i in range(comps)])
-                    comps = np.argwhere((sums > 10) & ((sums.max() / sums) < 5)).flatten()
-                    dense_mask = np.isin(dense_mask, comps + 1)
+                if scale > 1:
+                    dense_masks[:, :, section - min(relevant_sections)] = self.produce_precise_dense_mask(
+                        celldata_section, centroids_x, centroids_y, dense, dense_masks, scale, yhat)
                 else:
-                    dense_mask = np.zeros_like(self.seg_data[:, :, section])
+                    dense_masks[:, :, section - min(relevant_sections)] = \
+                        self.produce_rough_dense_mask(centroids_x, centroids_y, dense, yhat)
 
-                dense_masks[:, :, section - min(relevant_sections)] = dense_mask
+    def produce_precise_dense_mask(self, celldata_section, centroids_x, centroids_y, dense, dense_masks, scale, yhat):
+        dense_mask = np.zeros_like(dense_masks[:, :, 0], dtype=np.uint8)
+        radius = (math.sqrt(celldata_section.area.max() / math.pi) + 0.5) * 8 / scale
+        centroids_y, centroids_x = centroids_y[yhat == dense], centroids_x[yhat == dense]
+        radii = np.maximum((celldata_section.density.to_numpy() * radius + 0.5), 1).astype(int)
+        for i in range(centroids_x.shape[0]):
+            cv2.circle(dense_mask, (centroids_x[i], centroids_y[i]), radii[i], 1, cv2.FILLED)
+        dense_mask = ndi.binary_dilation(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
+        return self.remove_small_components(dense_mask)
+
+    def produce_rough_dense_mask(self, centroids_x, centroids_y, dense, yhat):
+        dense_mask = np.zeros_like(self.seg_data[:, :, 0])
+        dense_mask[centroids_y[yhat == dense], centroids_x[yhat == dense]] = 1
+        dense_mask = ndi.binary_closing(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
+        return self.remove_small_components(dense_mask)
+
+    def remove_small_components(self, dense_mask):
+        dense_mask, comps = ndi.measurements.label(dense_mask)
+        if comps > 0:
+            dm_nonzero = dense_mask[dense_mask != 0]
+            sums = np.array([(dm_nonzero == i + 1).sum() for i in range(comps)])
+            comps = np.argwhere((sums > 10) & ((sums.max() / sums) < 5)).flatten()
+            dense_mask = np.isin(dense_mask, comps + 1)
+        else:
+            dense_mask = np.zeros_like(self.seg_data[:, :, 0])
+        return dense_mask
 
     def plot_density_masks(self, csv, dense_masks, relevant_sections):
         heatmaps = dict()
@@ -121,16 +144,17 @@ class ExperimentCellsProcessor(object):
 
     def detect_pyramidal_dg(self, csv):
         dg_structs = [10703, 10704, 632]
+        scale = 4
         celldata_struct = csv[csv.structure_id.isin(dg_structs)]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
-        dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
-                                max(relevant_sections) - min(relevant_sections) + 1), dtype=int)
+        dense_masks = np.zeros((self.seg_data.shape[0] * 64 // scale, self.seg_data.shape[1] * 64 // scale,
+                                max(relevant_sections) - min(relevant_sections) + 1), dtype=np.uint8)
 
         self.build_dense_masks(celldata_struct, dense_masks, relevant_sections)
-        # self.plot_density_masks(csv, dense_masks, relevant_sections)
+        self.plot_density_masks(csv, dense_masks, relevant_sections)
 
-        centroids_y = celldata_struct.centroid_y.to_numpy().astype(int) // 64
-        centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // 64
+        centroids_y = celldata_struct.centroid_y.to_numpy().astype(int) // scale
+        centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // scale
         sections = celldata_struct.section.to_numpy().astype(int)
         csv.loc[csv.structure_id.isin(dg_structs), 'pyramidal'] = \
             dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
@@ -145,7 +169,7 @@ class ExperimentCellsProcessor(object):
         x = np.stack((sparse_neighbours.centroid_x.to_numpy(), sparse_neighbours.centroid_y.to_numpy())).swapaxes(0, 1)
         y = sparse_neighbours.structure_id.to_numpy()
 
-        neigh = KNeighborsClassifier(n_neighbors=5)
+        neigh = KNeighborsClassifier(n_neighbors=3)
         neigh.fit(x, y)
 
         x = np.stack((sparse.centroid_x.to_numpy(), sparse.centroid_y.to_numpy())).swapaxes(0, 1)
@@ -296,9 +320,10 @@ class CellProcessor(DirWatcher):
         'primary_injection_structure'
     ]
 
-    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir,
+    def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir, annotate,
                  _processor_number):
         super().__init__(input_dir, process_dir, output_dir, f'cell-processor-{_processor_number}')
+        self.annotate = annotate
         self.structure_ids = structs
         self.brain_seg_data_dir = structure_map_dir
         self.source_dir = input_dir
@@ -319,10 +344,19 @@ class CellProcessor(DirWatcher):
                                               self.logger)
         experiment.process()
 
+        if self.annotate:
+            annotator = ExperimentDataAnnotator(int(item), directory, self.logger)
+            annotator.process()
+
 
 class ExperimentCellAnalyzerTaskManager(ExperimentProcessTaskManager):
     def __init__(self):
         super().__init__("Connectivity experiment cell data analyzer")
+
+    def add_args(self, parser: argparse.ArgumentParser):
+        super().add_args(parser)
+        parser.add_argument('--annotate', action='store_true', default=False,
+                            help='Annotate after processing')
 
     def prepare_input(self, connectivity_dir, **kwargs):
         mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')
