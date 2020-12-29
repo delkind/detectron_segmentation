@@ -3,8 +3,6 @@ import functools
 import operator as op
 import os
 import pickle
-from collections import defaultdict
-from functools import reduce
 
 import cv2
 import numpy as np
@@ -14,6 +12,7 @@ from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from shapely.geometry import Polygon
 from sklearn.cluster import KMeans
+from sklearn.neighbors import KNeighborsClassifier
 
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
@@ -43,7 +42,7 @@ class ExperimentCellsProcessor(object):
 
     def get_structure_children(self):
         structure_ids = self.structure_tree.descendant_ids(self.parent_struct_id)
-        structure_ids = set(functools.reduce(op.add, structure_ids))
+        structure_ids = list(set(functools.reduce(op.add, structure_ids)))
         return structure_ids
 
     def get_structure_mask(self, section):
@@ -73,75 +72,119 @@ class ExperimentCellsProcessor(object):
                                   centroids_x[i] - 32: centroids_x[i] + 32].sum() for i in range(len(centroids_y))])
             csv.loc[csv.section == section, 'density'] = densities / 4096
 
-    def detect_pyramidal(self, csv):
+    def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
+        for section in relevant_sections:
+            celldata_section = celldata_struct[celldata_struct.section == section]
+            centroids_x = (celldata_section.centroid_x.to_numpy() // 64).astype(int)
+            centroids_y = (celldata_section.centroid_y.to_numpy() // 64).astype(int)
+            densities = celldata_section.density.to_numpy()
+
+            if densities.shape[0] > 2:
+                model = KMeans(n_clusters=2)
+                yhat = model.fit_predict(densities.reshape(-1, 1))
+                clusters = np.unique(yhat).tolist()
+                if len(clusters) == 1:
+                    yhat = np.zeros_like(densities)
+                    dense = 1
+                else:
+                    dense = np.argmax([densities[yhat == 0].mean(), densities[yhat == 1].mean()])
+
+                # border = np.percentile(densities, 50)
+                dense_mask = np.zeros_like(self.seg_data[:, :, 0])
+                dense_mask[centroids_y[yhat == dense], centroids_x[yhat == dense]] = 1
+                dense_mask = ndi.binary_closing(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
+                dense_mask, comps = ndi.measurements.label(dense_mask)
+                if comps > 0:
+                    sums = np.array([(dense_mask == i + 1).sum() for i in range(comps)])
+                    comps = np.argwhere((sums > 10) & ((sums.max() / sums) < 5)).flatten()
+                    dense_mask = np.isin(dense_mask, comps + 1)
+                else:
+                    dense_mask = np.zeros_like(self.seg_data[:, :, section])
+
+                dense_masks[:, :, section - min(relevant_sections)] = dense_mask
+
+    def plot_density_masks(self, csv, dense_masks, relevant_sections):
+        heatmaps = dict()
+        for section in relevant_sections:
+            heatmaps[section] = np.zeros_like(self.seg_data[:, :, section], dtype=float)
+            heatmaps[section][csv[csv.section == section].centroid_y.to_numpy().astype(int) // 64,
+                              csv[csv.section == section].centroid_x.to_numpy().astype(int) // 64] = \
+                csv[csv.section == section].density
+        import matplotlib.pyplot as plt
+        for section in range(dense_masks.shape[2]):
+            fig, axs = plt.subplots(1, 2)
+            fig.suptitle(f"Section {section + min(relevant_sections)}")
+            axs[0].imshow(dense_masks[:, :, section], cmap='gray')
+            axs[1].imshow(heatmaps.get(section + min(relevant_sections), np.zeros_like(dense_masks[:, :, section])),
+                          cmap='hot')
+            plt.show()
+
+    def detect_pyramidal_dg(self, csv):
+        dg_structs = [10703, 10704, 632]
+        celldata_struct = csv[csv.structure_id.isin(dg_structs)]
+        relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
+        dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
+                                max(relevant_sections) - min(relevant_sections) + 1))
+
+        self.build_dense_masks(celldata_struct, dense_masks, relevant_sections)
+        # self.plot_density_masks(csv, dense_masks, relevant_sections)
+
+        centroids_y = celldata_struct.centroid_y.to_numpy().astype(int) // 64
+        centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // 64
+        sections = celldata_struct.section.to_numpy().astype(int)
+        csv.loc[csv.structure_id.isin(dg_structs), 'pyramidal'] = \
+            dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)]
+
+        csv.loc[csv.structure_id.isin([10703, 10704]) & csv.pyramidal, 'structure'] = \
+            self.structure_tree.get_name_map()[632]
+        csv.loc[csv.structure_id.isin([10703, 10704]) & csv.pyramidal, 'structure_id'] = 632
+
+        sparse = csv[(csv.structure_id == 632) & (csv.pyramidal == False)]
+        sparse_neighbours = csv[csv.structure_id.isin([10703, 10704])]
+
+        x = np.stack((sparse_neighbours.centroid_x.to_numpy(), sparse_neighbours.centroid_y.to_numpy())).swapaxes(0, 1)
+        y = sparse_neighbours.structure_id.to_numpy()
+
+        neigh = KNeighborsClassifier(n_neighbors=5)
+        neigh.fit(x, y)
+
+        x = np.stack((sparse.centroid_x.to_numpy(), sparse.centroid_y.to_numpy())).swapaxes(0, 1)
+        y = neigh.predict(x).tolist()
+
+        csv.loc[(csv.structure_id == 632) & (csv.pyramidal == False), 'structure'] = \
+            [self.structure_tree.get_name_map()[i] for i in y]
+        csv.loc[(csv.structure_id == 632) & (csv.pyramidal == False), 'structure_id'] = y
+
+    def detect_pyramidal_ca(self, csv):
         structures_including_pyramidal = [f'Field CA{i}' for i in range(1, 4)]
-        dense_masks = defaultdict(dict)
         celldata_structs = csv[csv.structure.isin(structures_including_pyramidal)]
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
+        dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
+                                max(relevant_sections) - min(relevant_sections) + 1,
+                                len(structures_including_pyramidal)))
 
-        for structure in structures_including_pyramidal:
+        for ofs, structure in enumerate(structures_including_pyramidal):
             celldata_struct = celldata_structs.loc[csv.structure == structure]
+            self.build_dense_masks(celldata_struct, dense_masks[:, :, :, ofs], relevant_sections)
 
-            for section in relevant_sections:
-                celldata_section = celldata_struct[celldata_struct.section == section]
-                centroids_x = (celldata_section.centroid_x.to_numpy() // 64).astype(int)
-                centroids_y = (celldata_section.centroid_y.to_numpy() // 64).astype(int)
-                densities = celldata_section.density.to_numpy()
-                dense_mask = np.zeros_like(self.seg_data[:, :, section])
+        dense_masks = dense_masks.sum(axis=3) != 0
+        # self.plot_density_masks(csv, dense_masks, relevant_sections)
 
-                if densities.shape[0] > 2:
-                    model = KMeans(n_clusters=2)
-                    yhat = model.fit_predict(densities.reshape(-1, 1))
-                    clusters = np.unique(yhat).tolist()
-                    if len(clusters) == 1:
-                        yhat = np.zeros_like(densities)
-                        dense = 1
-                    else:
-                        dense = np.argmax([densities[yhat == 0].mean(), densities[yhat == 1].mean()])
-
-                    # border = np.percentile(densities, 50)
-                    dense_mask[centroids_y[yhat == dense], centroids_x[yhat == dense]] = 1
-                    dense_mask = ndi.binary_closing(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
-                    dense_mask, comps = ndi.measurements.label(dense_mask)
-                    if comps > 0:
-                        sums = np.array([(dense_mask == i + 1).sum() for i in range(comps)])
-                        comps = np.argwhere((sums > 10) & ((sums.max() / sums) < 5)).flatten()
-                        dense_mask = np.isin(dense_mask, comps + 1)
-                    else:
-                        dense_mask = np.zeros_like(self.seg_data[:, :, section])
-
-                dense_masks[section][structure] = dense_mask
-
-        dense_masks = {section: reduce(np.add, [m for s, m in dense_cells.items()])
-                       for section, dense_cells in dense_masks.items()}
-
-        # heatmaps = dict()
-        # for section in relevant_sections:
-        #     heatmaps[section] = np.zeros_like(self.seg_data[:, :, section], dtype=float)
-        #     heatmaps[section][csv[csv.section == section].centroid_y.to_numpy().astype(int) // 64,
-        #                       csv[csv.section == section].centroid_x.to_numpy().astype(int) // 64] = \
-        #         csv[csv.section == section].density
-        #
-        # import matplotlib.pyplot as plt
-        # for section, mask in dense_masks.items():
-        #     fig, axs = plt.subplots(1, 2)
-        #     fig.suptitle(f"Section {section}")
-        #     axs[0].imshow(mask, cmap='gray')
-        #     axs[1].imshow(heatmaps.get(section, mask), cmap='hot')
-        #     plt.show()
-
-        for row in celldata_structs.itertuples():
-            struct = dense_masks[row.section][int(row.centroid_y // 64), int(row.centroid_x) // 64]
-            if struct != 0:
-                csv.at[row.Index, 'pyramidal'] = True
+        centroids_y = celldata_structs.centroid_y.to_numpy().astype(int) // 64
+        centroids_x = celldata_structs.centroid_x.to_numpy().astype(int) // 64
+        sections = celldata_structs.section.to_numpy().astype(int)
+        csv.loc[csv.structure.isin(structures_including_pyramidal), 'pyramidal'] = \
+            dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)]
 
     def process(self):
         self.logger.info(f"Extracting cell data for {self.id}...")
         sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
-        if os.path.isfile(f'{self.directory}/celldata-{self.id}.csv') and os.path.isfile(f'{self.directory}/sectiondata-{self.id}.csv'):
-            csv = pandas.read_csv(f'{self.directory}/celldata-{self.id}.csv')
+        old_csv = f'{self.directory}/celldata-{self.id}.csv.old'
+        if os.path.isfile(old_csv):
+            self.logger.info(f"Detected old CSV file for {self.id}.")
+            csv = pandas.read_csv(old_csv)
             labels_to_remove = [c for c in csv if c.startswith('Unnamed')
-                                or c.startswith('pyramidal') or c == 'density']
+                                ]# or c.startswith('pyramidal') or c == 'density']
             csv = csv.drop(columns=labels_to_remove)
         else:
             section_data = list()
@@ -154,12 +197,14 @@ class ExperimentCellsProcessor(object):
             csv = pandas.DataFrame(section_data)
             csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
             csv = pandas.DataFrame(cell_data)
+            self.logger.info(f"Calculating densities for {self.id}...")
+            self.calculate_densities(csv)
+            self.logger.info(f"Extracting pyramidal layers for CA regions in {self.id}...")
+            csv['pyramidal'] = False
+            self.detect_pyramidal_ca(csv)
 
-        self.logger.info(f"Calculating densities for {self.id}...")
-        self.calculate_densities(csv)
-        self.logger.info(f"Extracting pyramidal layers for {self.id}...")
-        csv['pyramidal'] = False
-        self.detect_pyramidal(csv)
+        self.logger.info(f"Extracting pyramidal layers for DG regions in {self.id}...")
+        self.detect_pyramidal_dg(csv)
         csv.to_csv(f'{self.directory}/celldata-{self.id}.csv')
 
         csv = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
