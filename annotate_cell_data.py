@@ -47,6 +47,46 @@ unique_colors = [
 ]
 
 
+def create_section_image(section, experiment_id, directory, celldata, bboxes):
+    section_celldata = celldata[celldata.section == section]
+    section_numbers = section_celldata.structure_id.to_numpy()
+    section_modifiers = -(section_celldata.pyramidal.to_numpy().astype(int))
+    section_modifiers[section_modifiers == 0] = 1
+    section_numbers *= section_modifiers
+    coords = (np.stack((section_celldata.centroid_x.to_numpy() // 64,
+                        section_celldata.centroid_y.to_numpy() // 64,
+                        section_numbers)).swapaxes(0, 1)).astype(int)
+    coords = list(zip(*list(zip(*coords.tolist()))))
+    coords = {(x, y): v for x, y, v in coords}
+    unique_numbers = np.unique(section_numbers).tolist()
+    colors = {v: unique_colors[i % len(unique_colors)] for i, v in enumerate(unique_numbers)}
+
+    thumb = cv2.imread(f"{directory}/thumbnail-{experiment_id}-{section}.jpg", cv2.IMREAD_GRAYSCALE)
+    thumb = cv2.resize(thumb, (0, 0), fx=16, fy=16)
+    thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
+    for bbox in bboxes[section]:
+        x, y, w, h = bbox.scale(64)
+        image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
+                           cv2.IMREAD_GRAYSCALE)
+        mask = cv2.imread(f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png',
+                          cv2.IMREAD_GRAYSCALE)
+        image = cv2.resize(image, (0, 0), fx=0.25, fy=0.25)
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        new_img = np.zeros_like(mask)
+        new_img = cv2.fillPoly(new_img, cnts, color=255)
+        cnts, _ = cv2.findContours(new_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cnts = [cnt for cnt in cnts if cnt.shape[0] > 2]
+        polygons = [Polygon((cnt.squeeze() + np.array([x, y])) // 64).centroid for cnt in cnts]
+        polygons = [(int(p.x), int(p.y)) for p in polygons]
+        cnts = {v: [cnt.squeeze() // 4 for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == v]
+                for v in unique_numbers}
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        for p in unique_numbers:
+            cv2.polylines(image, cnts[p], color=colors[p], thickness=1, isClosed=True)
+        thumb[y // 4: y // 4 + image.shape[0], x // 4: x // 4 + image.shape[1], :] = image
+    return thumb
+
+
 class ExperimentDataAnnotator(object):
     def __init__(self, experiment_id, directory, logger):
         self.logger = logger
@@ -91,42 +131,7 @@ class ExperimentDataAnnotator(object):
             self.create_section_image(section)
 
     def create_section_image(self, section):
-        section_celldata = self.celldata[self.celldata.section == section]
-        section_numbers = section_celldata.structure_id.to_numpy()
-        section_modifiers = -(section_celldata.pyramidal.to_numpy().astype(int))
-        section_modifiers[section_modifiers == 0] = 1
-        section_numbers *= section_modifiers
-        coords = (np.stack((section_celldata.centroid_x.to_numpy() // 64,
-                            section_celldata.centroid_y.to_numpy() // 64,
-                            section_numbers)).swapaxes(0, 1)).astype(int)
-        coords = list(zip(*list(zip(*coords.tolist()))))
-        coords = {(x, y): v for x, y, v in coords}
-        unique_numbers = np.unique(section_numbers).tolist()
-        colors = {v: unique_colors[i % len(unique_colors)] for i, v in enumerate(unique_numbers)}
-
-        thumb = cv2.imread(f"{self.directory}/thumbnail-{self.experiment_id}-{section}.jpg", cv2.IMREAD_GRAYSCALE)
-        thumb = cv2.resize(thumb, (0, 0), fx=16, fy=16)
-        thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
-        for bbox in self.bboxes[section]:
-            x, y, w, h = bbox.scale(64)
-            image = cv2.imread(f'{self.directory}/full-{self.experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
-                               cv2.IMREAD_GRAYSCALE)
-            mask = cv2.imread(f'{self.directory}/cellmask-{self.experiment_id}-{section}-{x}_{y}_{w}_{h}.png',
-                              cv2.IMREAD_GRAYSCALE)
-            image = cv2.resize(image, (0, 0), fx=0.25, fy=0.25)
-            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            new_img = np.zeros_like(mask)
-            new_img = cv2.fillPoly(new_img, cnts, color=255)
-            cnts, _ = cv2.findContours(new_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cnts = [cnt for cnt in cnts if cnt.shape[0] > 2]
-            polygons = [Polygon((cnt.squeeze() + np.array([x, y])) // 64).centroid for cnt in cnts]
-            polygons = [(int(p.x), int(p.y)) for p in polygons]
-            cnts = {v: [cnt.squeeze() // 4 for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == v]
-                    for v in unique_numbers}
-            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            for p in unique_numbers:
-                cv2.polylines(image, cnts[p], color=colors[p], thickness=1, isClosed=True)
-            thumb[y // 4: y // 4 + image.shape[0], x // 4: x // 4 + image.shape[1], :] = image
+        thumb = create_section_image(section, self.experiment_id, self.directory, self.celldata, self.bboxes)
         cv2.imwrite(f"{self.directory}/annotated-{self.experiment_id}-{section}.jpg", thumb)
 
     def create_tiles(self, placer, name, zoom, **kwargs):
@@ -221,7 +226,6 @@ class ExperimentCellAnalyzerTaskManager(ExperimentProcessTaskManager):
     def execute_task(self, structs, structure_map_dir, **kwargs):
         analyzer = CellProcessor(structs=ast.literal_eval(structs), structure_map_dir=structure_map_dir, **kwargs)
         experiments = os.listdir(structure_map_dir)
-        # analyzer.run_until_count(len(experiments))
         analyzer.run_until_count(len(experiments))
 
 

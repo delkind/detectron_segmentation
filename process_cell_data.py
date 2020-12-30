@@ -106,7 +106,7 @@ class ExperimentCellsProcessor(object):
         radii = np.maximum((celldata_section.density.to_numpy() * radius + 0.5), 1).astype(int)
         for i in range(centroids_x.shape[0]):
             cv2.circle(dense_mask, (centroids_x[i], centroids_y[i]), radii[i], 1, cv2.FILLED)
-        dense_mask = ndi.binary_dilation(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
+        dense_mask = ndi.binary_dilation(dense_mask, ndi.generate_binary_structure(2, 64 // scale), iterations=6)
         return self.remove_small_components(dense_mask)
 
     def produce_rough_dense_mask(self, centroids_x, centroids_y, dense, yhat):
@@ -151,7 +151,7 @@ class ExperimentCellsProcessor(object):
                                 max(relevant_sections) - min(relevant_sections) + 1), dtype=np.uint8)
 
         self.build_dense_masks(celldata_struct, dense_masks, relevant_sections)
-        self.plot_density_masks(csv, dense_masks, relevant_sections)
+        # self.plot_density_masks(csv, dense_masks, relevant_sections)
 
         centroids_y = celldata_struct.centroid_y.to_numpy().astype(int) // scale
         centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // scale
