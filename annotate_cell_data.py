@@ -50,7 +50,7 @@ unique_colors = [
 def create_section_image(section, experiment_id, directory, celldata, bboxes):
     section_celldata = celldata[celldata.section == section]
     section_numbers = section_celldata.structure_id.to_numpy()
-    section_modifiers = -(section_celldata.pyramidal.to_numpy().astype(int))
+    section_modifiers = -(section_celldata.dense.to_numpy().astype(int))
     section_modifiers[section_modifiers == 0] = 1
     section_numbers *= section_modifiers
     coords = (np.stack((section_celldata.centroid_x.to_numpy() // 64,
@@ -170,7 +170,7 @@ class ExperimentDataAnnotator(object):
             bar.ax.set_yticklabels(labels)
 
     @staticmethod
-    def place_patches(ax, thumb, gridsize, section_celldata, zoom, radius=3, colname='pyramidal'):
+    def place_patches(ax, thumb, gridsize, section_celldata, zoom, radius=3, colname='dense'):
         ax.imshow(thumb)
         structs = np.unique(section_celldata.structure_id.to_numpy() + section_celldata[colname].to_numpy()).tolist()
         struct_counts = {s: len(section_celldata[(section_celldata.structure_id + section_celldata[colname]) == s]) for

@@ -73,7 +73,7 @@ class ExperimentCellsProcessor(object):
             centroids_x = csv_section.centroid_x.to_numpy().astype(int)
             densities = np.array([image[centroids_y[i] - 32: centroids_y[i] + 32,
                                   centroids_x[i] - 32: centroids_x[i] + 32].sum() for i in range(len(centroids_y))])
-            csv.loc[csv.section == section, 'density'] = densities / 4096
+            csv.at[csv.section == section, 'density'] = densities / 4096
 
     def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
         scale = 64 // (dense_masks.shape[0] // self.seg_data.shape[0])
@@ -92,7 +92,7 @@ class ExperimentCellsProcessor(object):
                     dense = 1
                 else:
                     dense = np.argmax([densities[yhat == 0].mean(), densities[yhat == 1].mean()])
-                if scale > 1:
+                if scale < 8:
                     dense_masks[:, :, section - min(relevant_sections)] = self.produce_precise_dense_mask(
                         celldata_section, centroids_x, centroids_y, dense, dense_masks, scale, yhat)
                 else:
@@ -142,7 +142,7 @@ class ExperimentCellsProcessor(object):
                           cmap='hot')
             plt.show()
 
-    def detect_pyramidal_dg(self, csv):
+    def detect_dense_dg(self, csv):
         dg_structs = [10703, 10704, 632]
         scale = 4
         celldata_struct = csv[csv.structure_id.isin(dg_structs)]
@@ -156,14 +156,12 @@ class ExperimentCellsProcessor(object):
         centroids_y = celldata_struct.centroid_y.to_numpy().astype(int) // scale
         centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // scale
         sections = celldata_struct.section.to_numpy().astype(int)
-        csv.loc[csv.structure_id.isin(dg_structs), 'pyramidal'] = \
+        csv.at[csv.structure_id.isin(dg_structs), 'dense'] = \
             dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
 
-        csv.loc[csv.structure_id.isin([10703, 10704]) & csv.pyramidal, 'structure'] = \
-            self.structure_tree.get_name_map()[632]
-        csv.loc[csv.structure_id.isin([10703, 10704]) & csv.pyramidal, 'structure_id'] = 632
+        csv.at[csv.structure_id.isin([10703, 10704]) & csv.dense, 'structure_id'] = 632
 
-        sparse = csv[(csv.structure_id == 632) & (csv.pyramidal == False)]
+        sparse = csv[(csv.structure_id == 632) & (csv.dense == False)]
         sparse_neighbours = csv[csv.structure_id.isin([10703, 10704])]
 
         x = np.stack((sparse_neighbours.centroid_x.to_numpy(), sparse_neighbours.centroid_y.to_numpy())).swapaxes(0, 1)
@@ -175,20 +173,20 @@ class ExperimentCellsProcessor(object):
         x = np.stack((sparse.centroid_x.to_numpy(), sparse.centroid_y.to_numpy())).swapaxes(0, 1)
         y = neigh.predict(x).tolist()
 
-        csv.loc[(csv.structure_id == 632) & (csv.pyramidal == False), 'structure'] = \
-            [self.structure_tree.get_name_map()[i] for i in y]
-        csv.loc[(csv.structure_id == 632) & (csv.pyramidal == False), 'structure_id'] = y
+        csv.at[(csv.structure_id == 632) & (csv.dense == False), 'structure_id'] = y
 
-    def detect_pyramidal_ca(self, csv):
-        structures_including_pyramidal = [f'Field CA{i}' for i in range(1, 4)]
-        celldata_structs = csv[csv.structure.isin(structures_including_pyramidal)]
+    def detect_dense_ca(self, csv):
+        structures_including_dense = [f'Field CA{i}' for i in range(1, 4)]
+        structures_including_dense = [r['id'] for r in
+                                          self.structure_tree.get_structures_by_name(structures_including_dense)]
+        celldata_structs = csv[csv.structure_id.isin(structures_including_dense)]
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
         dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
                                 max(relevant_sections) - min(relevant_sections) + 1,
-                                len(structures_including_pyramidal)), dtype=int)
+                                len(structures_including_dense)), dtype=int)
 
-        for ofs, structure in enumerate(structures_including_pyramidal):
-            celldata_struct = celldata_structs.loc[csv.structure == structure]
+        for ofs, structure in enumerate(structures_including_dense):
+            celldata_struct = celldata_structs[celldata_structs.structure_id.isin([structure])]
             self.build_dense_masks(celldata_struct, dense_masks[:, :, :, ofs], relevant_sections)
 
         dense_masks = dense_masks.sum(axis=3) != 0
@@ -197,38 +195,32 @@ class ExperimentCellsProcessor(object):
         centroids_y = celldata_structs.centroid_y.to_numpy().astype(int) // 64
         centroids_x = celldata_structs.centroid_x.to_numpy().astype(int) // 64
         sections = celldata_structs.section.to_numpy().astype(int)
-        csv.loc[csv.structure.isin(structures_including_pyramidal), 'pyramidal'] = \
+        csv.at[csv.structure_id.isin(structures_including_dense), 'dense'] = \
             dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
 
     def process(self):
         self.logger.info(f"Extracting cell data for {self.id}...")
         sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
-        old_csv = f'{self.directory}/celldata-{self.id}.csv.old'
-        if os.path.isfile(old_csv):
-            self.logger.info(f"Detected old CSV file for {self.id}.")
-            csv = pandas.read_csv(old_csv)
-            labels_to_remove = [c for c in csv if c.startswith('Unnamed')
-                                ]# or c.startswith('pyramidal') or c == 'density']
-            csv = csv.drop(columns=labels_to_remove)
-        else:
-            section_data = list()
-            cell_data = list()
-            for section in sections:
-                cells, sec = self.process_section(section)
-                section_data.append(sec)
-                cell_data += cells
+        section_data = list()
+        cell_data = list()
+        for section in sections:
+            cells, sec = self.process_section(section)
+            section_data.append(sec)
+            cell_data += cells
 
-            csv = pandas.DataFrame(section_data)
-            csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
-            csv = pandas.DataFrame(cell_data)
-            self.logger.info(f"Calculating densities for {self.id}...")
-            self.calculate_densities(csv)
-            self.logger.info(f"Extracting pyramidal layers for CA regions in {self.id}...")
-            csv['pyramidal'] = False
-            self.detect_pyramidal_ca(csv)
+        csv = pandas.DataFrame(section_data)
+        csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
+        csv = pandas.DataFrame(cell_data)
+        self.logger.info(f"Calculating densities for {self.id}...")
+        self.calculate_densities(csv)
+        self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
+        csv['dense'] = False
+        self.detect_dense_ca(csv)
 
-        self.logger.info(f"Extracting pyramidal layers for DG regions in {self.id}...")
-        self.detect_pyramidal_dg(csv)
+        self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
+        self.detect_dense_dg(csv)
+        csv = csv.round(2)
+        self.logger.info(f"Saving CSV for {self.id}...")
         csv.to_csv(f'{self.directory}/celldata-{self.id}.csv')
 
         csv = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
@@ -255,7 +247,7 @@ class ExperimentCellsProcessor(object):
         brain_area = self.get_brain_area(section)
         struct_mask = self.get_structure_mask(section)
 
-        self.logger.info(f"Experiment: {self.id}, processing section {section}...")
+        self.logger.debug(f"Experiment: {self.id}, processing section {section}...")
         struct_area = struct_mask.sum()
 
         cells_data = list()
@@ -266,14 +258,14 @@ class ExperimentCellsProcessor(object):
                 struct_id = self.get_struct_id(cell, section)
                 if struct_id in self.structure_ids:
                     cells_data.append({
-                        'experiment': self.id,
                         'section': section,
                         'structure_id': struct_id,
-                        'structure': self.structure_tree.get_name_map()[struct_id],
-                        'centroid_x': cell.centroid.x,
-                        'centroid_y': cell.centroid.y,
+                        # 'structure': self.structure_tree.get_name_map()[struct_id],
+                        'centroid_x': int(cell.centroid.x),
+                        'centroid_y': int(cell.centroid.y),
                         'area': cell.area * (self.subimages[section]['resolution'] ** 2),
-                        'perimeter': cell.length * self.subimages[section]['resolution']
+                        'perimeter': cell.length * self.subimages[section]['resolution'],
+                        # 'polygon': np.stack(cell.exterior.coords.xy).swapaxes(0, 1).astype(int).tolist()
                     })
 
         return cells_data, {
