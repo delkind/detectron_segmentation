@@ -6,9 +6,12 @@ import scipy.stats as stats
 
 
 def reject_outliers(data):
-    clean_data = data[data < np.percentile(data, 99)]
-    if len(clean_data > 0):
-        return clean_data
+    if len(data) > 2:
+        clean_data = data[data < np.percentile(data, 99)]
+        if len(clean_data > 0):
+            return clean_data
+        else:
+            return data
     else:
         return data
 
