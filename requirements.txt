@@ -44,8 +44,13 @@ yacs==0.1.6
 scikit-image~=0.17.2
 detectron2~=0.1
 allensdk~=2.1.0
-Shapely~=1.7.0
+Shapely~=1.7.1
 pandas~=0.25.3
 SimpleITK~=1.2.4
 scipy~=1.5.2
 scikit-learn~=0.23.2
+fastdist~=1.1.0
+numba
+pyarrow~=2.0.0
+ipywidgets~=7.6.2
+ipython~=7.19.0

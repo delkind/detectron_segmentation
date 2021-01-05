@@ -1,8 +1,13 @@
+import os
 from collections import defaultdict
 
+import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats as stats
+from IPython.display import display, Markdown
+from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+import pandas as pd
 
 
 def reject_outliers(data):
@@ -119,6 +124,34 @@ def plot_section_violin_diagram(data, structure_tree, thumb=None, bins=50):
     plt.show()
 
 
+def retrieve_nested_path(data, path):
+    for p in path:
+        data = data[p]
+
+    return data
+
+
+class DataFramesHolder(object):
+    def __init__(self, data_dir, lazy=True, cache=True):
+        self.cache = cache
+        self.lazy = lazy
+        self.data_dir = data_dir
+        self.data = dict()
+
+    def load_data(self, e):
+        e = int(e)
+        df = self.data.get(e, pd.read_parquet(f'{self.data_dir}/{e}/celldata-{e}.parquet'))
+        if self.cache:
+            self.data[e] = df
+        return df
+
+    def __getitem__(self, item):
+        if isinstance(item, list):
+            return pd.concat([self.load_data(e) for e in item])
+        else:
+            return self.load_data(item)
+
+
 def test():
     import os
     import random
@@ -127,14 +160,8 @@ def test():
     input_dir = 'output/hippo_exp/analyzed'
     experiment_ids = os.listdir(input_dir)
     experiment_id = random.choice(experiment_ids)
-    from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
-    mcc = MouseConnectivityCache(manifest_file=f'mouse_connectivity/mouse_connectivity_manifest.json',
-                                 resolution=25)
-    directory = f"{input_dir}/{experiment_id}"
-    full_data = pd.read_csv(f"{directory}/celldata-{experiment_id}.csv")
-    full_data_mtime = os.path.getmtime(f"{directory}/celldata-{experiment_id}.csv")
-    plot_section_histograms(full_data, mcc.get_structure_tree())
-    plot_section_violin_diagram(full_data, mcc.get_structure_tree())
+    holder = DataFramesHolder(input_dir)
+    pass
 
 
 if __name__ == '__main__':
