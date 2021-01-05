@@ -1,13 +1,10 @@
 import os
 from collections import defaultdict
 
-import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.stats as stats
-from IPython.display import display, Markdown
-from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 import pandas as pd
+import scipy.stats as stats
 
 
 def reject_outliers(data):
@@ -152,10 +149,13 @@ class DataFramesHolder(object):
             return self.load_data(item)
 
 
+def is_file_up_to_date(path, base_time):
+    return os.path.isfile(path) and os.path.getmtime(path) > base_time
+
+
 def test():
     import os
     import random
-    import pandas as pd
 
     input_dir = 'output/hippo_exp/analyzed'
     experiment_ids = os.listdir(input_dir)
