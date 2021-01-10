@@ -5,6 +5,7 @@ import math
 import operator as op
 import os
 import pickle
+from collections import defaultdict
 
 import cv2
 import numpy as np
@@ -54,8 +55,8 @@ class ExperimentCellsProcessor(object):
         mask = ndi.binary_closing(ndi.binary_fill_holes(mask).astype(np.int8)).astype(np.int8)
         return mask
 
-    def calculate_densities(self, csv):
-        csv['density'] = 0
+    def calculate_coverages(self, csv):
+        csv['coverage'] = 0
         for section in sorted(np.unique(csv.section)):
             csv_section = csv[csv.section == section]
             self.logger.debug(f"Creating heatmap experiment {self.id} section {section}")
@@ -71,9 +72,9 @@ class ExperimentCellsProcessor(object):
 
             centroids_y = csv_section.centroid_y.to_numpy().astype(int)
             centroids_x = csv_section.centroid_x.to_numpy().astype(int)
-            densities = np.array([image[centroids_y[i] - 32: centroids_y[i] + 32,
+            coverages = np.array([image[centroids_y[i] - 32: centroids_y[i] + 32,
                                   centroids_x[i] - 32: centroids_x[i] + 32].sum() for i in range(len(centroids_y))])
-            csv.at[csv.section == section, 'density'] = densities / 4096
+            csv.at[csv.section == section, 'coverage'] = coverages / 4096
 
     def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
         scale = 64 // (dense_masks.shape[0] // self.seg_data.shape[0])
@@ -81,35 +82,35 @@ class ExperimentCellsProcessor(object):
             celldata_section = celldata_struct[celldata_struct.section == section]
             centroids_x = (celldata_section.centroid_x.to_numpy() // scale).astype(int)
             centroids_y = (celldata_section.centroid_y.to_numpy() // scale).astype(int)
-            densities = celldata_section.density.to_numpy()
+            coverages = celldata_section.coverage.to_numpy()
 
-            if densities.shape[0] > 2:
+            if coverages.shape[0] > 2:
                 model = KMeans(n_clusters=2)
-                yhat = model.fit_predict(densities.reshape(-1, 1))
+                yhat = model.fit_predict(coverages.reshape(-1, 1))
                 clusters = np.unique(yhat).tolist()
                 if len(clusters) == 1:
-                    yhat = np.zeros_like(densities)
+                    yhat = np.zeros_like(coverages)
                     dense = 1
                 else:
-                    dense = np.argmax([densities[yhat == 0].mean(), densities[yhat == 1].mean()])
+                    dense = np.argmax([coverages[yhat == 0].mean(), coverages[yhat == 1].mean()])
                 if scale < 8:
                     dense_masks[:, :, section - min(relevant_sections)] = self.produce_precise_dense_mask(
                         celldata_section, centroids_x, centroids_y, dense, dense_masks, scale, yhat)
                 else:
                     dense_masks[:, :, section - min(relevant_sections)] = \
-                        self.produce_rough_dense_mask(centroids_x, centroids_y, dense, yhat)
+                        self.produce_coarse_dense_mask(centroids_x, centroids_y, dense, yhat)
 
     def produce_precise_dense_mask(self, celldata_section, centroids_x, centroids_y, dense, dense_masks, scale, yhat):
         dense_mask = np.zeros_like(dense_masks[:, :, 0], dtype=np.uint8)
         radius = (math.sqrt(celldata_section.area.max() / math.pi) + 0.5) * 8 / scale
         centroids_y, centroids_x = centroids_y[yhat == dense], centroids_x[yhat == dense]
-        radii = np.maximum((celldata_section.density.to_numpy() * radius + 0.5), 1).astype(int)
+        radii = np.maximum((celldata_section.coverage.to_numpy() * radius + 0.5), 1).astype(int)
         for i in range(centroids_x.shape[0]):
             cv2.circle(dense_mask, (centroids_x[i], centroids_y[i]), radii[i], 1, cv2.FILLED)
         dense_mask = ndi.binary_dilation(dense_mask, ndi.generate_binary_structure(2, 64 // scale), iterations=6)
         return self.remove_small_components(dense_mask)
 
-    def produce_rough_dense_mask(self, centroids_x, centroids_y, dense, yhat):
+    def produce_coarse_dense_mask(self, centroids_x, centroids_y, dense, yhat):
         dense_mask = np.zeros_like(self.seg_data[:, :, 0])
         dense_mask[centroids_y[yhat == dense], centroids_x[yhat == dense]] = 1
         dense_mask = ndi.binary_closing(dense_mask, ndi.generate_binary_structure(2, 1), iterations=4)
@@ -126,13 +127,13 @@ class ExperimentCellsProcessor(object):
             dense_mask = np.zeros_like(self.seg_data[:, :, 0])
         return dense_mask
 
-    def plot_density_masks(self, csv, dense_masks, relevant_sections):
+    def plot_coverage_masks(self, data_frame, dense_masks, relevant_sections):
         heatmaps = dict()
         for section in relevant_sections:
             heatmaps[section] = np.zeros_like(self.seg_data[:, :, section], dtype=float)
-            heatmaps[section][csv[csv.section == section].centroid_y.to_numpy().astype(int) // 64,
-                              csv[csv.section == section].centroid_x.to_numpy().astype(int) // 64] = \
-                csv[csv.section == section].density
+            heatmaps[section][data_frame[data_frame.section == section].centroid_y.to_numpy().astype(int) // 64,
+                              data_frame[data_frame.section == section].centroid_x.to_numpy().astype(int) // 64] = \
+                data_frame[data_frame.section == section].coverage
         import matplotlib.pyplot as plt
         for section in range(dense_masks.shape[2]):
             fig, axs = plt.subplots(1, 2)
@@ -142,27 +143,27 @@ class ExperimentCellsProcessor(object):
                           cmap='hot')
             plt.show()
 
-    def detect_dense_dg(self, csv):
+    def detect_dense_dg(self, data_frame):
         dg_structs = [10703, 10704, 632]
         scale = 4
-        celldata_struct = csv[csv.structure_id.isin(dg_structs)]
+        celldata_struct = data_frame[data_frame.structure_id.isin(dg_structs)]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
         dense_masks = np.zeros((self.seg_data.shape[0] * 64 // scale, self.seg_data.shape[1] * 64 // scale,
                                 max(relevant_sections) - min(relevant_sections) + 1), dtype=np.uint8)
 
         self.build_dense_masks(celldata_struct, dense_masks, relevant_sections)
-        # self.plot_density_masks(csv, dense_masks, relevant_sections)
+        # self.plot_coverage_masks(data_frame, dense_masks, relevant_sections)
 
         centroids_y = celldata_struct.centroid_y.to_numpy().astype(int) // scale
         centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // scale
         sections = celldata_struct.section.to_numpy().astype(int)
-        csv.at[csv.structure_id.isin(dg_structs), 'dense'] = \
+        data_frame.at[data_frame.structure_id.isin(dg_structs), 'dense'] = \
             dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
 
-        csv.at[csv.structure_id.isin([10703, 10704]) & csv.dense, 'structure_id'] = 632
+        data_frame.at[data_frame.structure_id.isin([10703, 10704]) & data_frame.dense, 'structure_id'] = 632
 
-        sparse = csv[(csv.structure_id == 632) & (csv.dense == False)]
-        sparse_neighbours = csv[csv.structure_id.isin([10703, 10704])]
+        sparse = data_frame[(data_frame.structure_id == 632) & (data_frame.dense == False)]
+        sparse_neighbours = data_frame[data_frame.structure_id.isin([10703, 10704])]
 
         x = np.stack((sparse_neighbours.centroid_x.to_numpy(), sparse_neighbours.centroid_y.to_numpy())).swapaxes(0, 1)
         y = sparse_neighbours.structure_id.to_numpy()
@@ -173,30 +174,50 @@ class ExperimentCellsProcessor(object):
         x = np.stack((sparse.centroid_x.to_numpy(), sparse.centroid_y.to_numpy())).swapaxes(0, 1)
         y = neigh.predict(x).tolist()
 
-        csv.at[(csv.structure_id == 632) & (csv.dense == False), 'structure_id'] = y
+        data_frame.at[(data_frame.structure_id == 632) & (data_frame.dense == False), 'structure_id'] = y
+
+        dense_dg_area = np.sum([dense_masks[:, :, i].sum() * (self.subimages[min(relevant_sections) + i]
+                                                                ['resolution'] * 4) ** 2 for i in
+                             range(dense_masks.shape[2])])
+        dg_area = np.sum(
+            [np.isin(self.seg_data[:, :, i], [10703, 10704, 632]).sum() * (self.subimages[i]['resolution'] * 64) ** 2
+             for i in relevant_sections])
+
+        return {'dense': dense_dg_area, 'sparse': dg_area - dense_dg_area}
 
     def detect_dense_ca(self, csv):
         structures_including_dense = [f'Field CA{i}' for i in range(1, 4)]
         structures_including_dense = [r['id'] for r in
-                                          self.structure_tree.get_structures_by_name(structures_including_dense)]
+                                      self.structure_tree.get_structures_by_name(structures_including_dense)]
         celldata_structs = csv[csv.structure_id.isin(structures_including_dense)]
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
         dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
                                 max(relevant_sections) - min(relevant_sections) + 1,
                                 len(structures_including_dense)), dtype=int)
 
+        areas = defaultdict(dict)
+
         for ofs, structure in enumerate(structures_including_dense):
             celldata_struct = celldata_structs[celldata_structs.structure_id.isin([structure])]
             self.build_dense_masks(celldata_struct, dense_masks[:, :, :, ofs], relevant_sections)
+            dense_area = np.sum([dense_masks[:, :, i, ofs].sum() * (self.subimages[min(relevant_sections) + i]
+                                                                    ['resolution'] * 64) ** 2 for i in
+                                 range(dense_masks.shape[2])])
+            total_area = np.sum(
+                [(self.seg_data[:, :, i] == structure).sum() * (self.subimages[i]['resolution'] * 64) ** 2
+                 for i in relevant_sections])
+            areas[structure] = {'dense': dense_area, 'sparse': total_area - dense_area}
 
         dense_masks = dense_masks.sum(axis=3) != 0
-        # self.plot_density_masks(csv, dense_masks, relevant_sections)
+        # self.plot_coverage_masks(csv, dense_masks, relevant_sections)
 
         centroids_y = celldata_structs.centroid_y.to_numpy().astype(int) // 64
         centroids_x = celldata_structs.centroid_x.to_numpy().astype(int) // 64
         sections = celldata_structs.section.to_numpy().astype(int)
         csv.at[csv.structure_id.isin(structures_including_dense), 'dense'] = \
             dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
+
+        return areas
 
     def process(self):
         self.logger.info(f"Extracting cell data for {self.id}...")
@@ -208,23 +229,24 @@ class ExperimentCellsProcessor(object):
             section_data.append(sec)
             cell_data += cells
 
-        csv = pandas.DataFrame(section_data)
-        csv.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
-        csv = pandas.DataFrame(cell_data)
-        self.logger.info(f"Calculating densities for {self.id}...")
-        self.calculate_densities(csv)
+        cell_dataframe = pandas.DataFrame(section_data)
+        cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
+        cell_dataframe = pandas.DataFrame(cell_data)
+        self.logger.info(f"Calculating coverages for {self.id}...")
+        self.calculate_coverages(cell_dataframe)
         self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
-        csv['dense'] = False
-        self.detect_dense_ca(csv)
+        cell_dataframe['dense'] = False
+        dense_areas = self.detect_dense_ca(cell_dataframe)
 
         self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
-        self.detect_dense_dg(csv)
-        csv = csv.round(2)
-        self.logger.info(f"Saving CSV for {self.id}...")
-        csv.to_csv(f'{self.directory}/celldata-{self.id}.csv')
+        dense_areas[632] = self.detect_dense_dg(cell_dataframe)
+        self.logger.info(f"Saving cell data for {self.id}...")
+        cell_dataframe.to_parquet(f'{self.directory}/celldata-{self.id}.parquet')
 
-        csv = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
-        csv.to_csv(f'{self.directory}/experimentdata-{self.id}.csv', index=False)
+        cell_dataframe = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
+        cell_dataframe.to_csv(f'{self.directory}/experimentdata-{self.id}.csv', index=False)
+        with open(f'{self.directory}/areas.pickle', 'wb') as f:
+            pickle.dump(dense_areas, file=f)
 
     def get_cell_mask(self, section, offset_x, offset_y, w, h, mask):
         cell_mask_file_name = os.path.join(self.directory,
@@ -254,19 +276,8 @@ class ExperimentCellsProcessor(object):
 
         for offset_x, offset_y, w, h in map(lambda b: b.scale(64), self.bboxes[section]):
             cells = self.get_cell_mask(section, offset_x, offset_y, w, h, struct_mask)
-            for cell in cells:
-                struct_id = self.get_struct_id(cell, section)
-                if struct_id in self.structure_ids:
-                    cells_data.append({
-                        'section': section,
-                        'structure_id': struct_id,
-                        # 'structure': self.structure_tree.get_name_map()[struct_id],
-                        'centroid_x': int(cell.centroid.x),
-                        'centroid_y': int(cell.centroid.y),
-                        'area': cell.area * (self.subimages[section]['resolution'] ** 2),
-                        'perimeter': cell.length * self.subimages[section]['resolution'],
-                        # 'polygon': np.stack(cell.exterior.coords.xy).swapaxes(0, 1).astype(int).tolist()
-                    })
+            box_cell_data = self.polygons_to_cell_data(cells, section)
+            cells_data += box_cell_data
 
         return cells_data, {
             'experiment_id': self.id,
@@ -274,6 +285,15 @@ class ExperimentCellsProcessor(object):
             'brain_area': brain_area * ((self.subimages[section]['resolution'] * 64) ** 2),
             'struct_area': struct_area * ((self.subimages[section]['resolution'] * 64) ** 2)
         }
+
+    def polygons_to_cell_data(self, cells, section):
+        struct_ids = [self.get_struct_id(cell, section) for cell in cells]
+        box_cell_data = [{'section': section, 'structure_id': struct_id, 'centroid_x': int(cell.centroid.x),
+                          'centroid_y': int(cell.centroid.y),
+                          'area': cell.area * (self.subimages[section]['resolution'] ** 2),
+                          'perimeter': cell.length * self.subimages[section]['resolution'], } for cell, struct_id in
+                         zip(cells, struct_ids) if struct_id in self.structure_ids]
+        return box_cell_data
 
     def get_struct_id(self, cell, section):
         y = int(cell.centroid.y // 64)
