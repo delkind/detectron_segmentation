@@ -148,6 +148,9 @@ class ExperimentCellsProcessor(object):
         scale = 4
         celldata_struct = data_frame[data_frame.structure_id.isin(dg_structs)]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
+        if not relevant_sections:
+            return {'dense': 0, 'sparse': 0}
+
         dense_masks = np.zeros((self.seg_data.shape[0] * 64 // scale, self.seg_data.shape[1] * 64 // scale,
                                 max(relevant_sections) - min(relevant_sections) + 1), dtype=np.uint8)
 
@@ -191,6 +194,9 @@ class ExperimentCellsProcessor(object):
                                       self.structure_tree.get_structures_by_name(structures_including_dense)]
         celldata_structs = csv[csv.structure_id.isin(structures_including_dense)]
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
+        if not relevant_sections:
+            return {403: {'dense': 0, 'sparse': 0}}
+
         dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
                                 max(relevant_sections) - min(relevant_sections) + 1,
                                 len(structures_including_dense)), dtype=int)
