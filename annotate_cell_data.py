@@ -194,7 +194,7 @@ class ExperimentDataAnnotator(object):
         heatmap = np.zeros((thumb.size[1], thumb.size[0]), dtype=float)
         x = (section_celldata.centroid_x.to_numpy() // 64).astype(int)
         y = (section_celldata.centroid_y.to_numpy() // 64).astype(int)
-        heatmap[y, x] = section_celldata.density.to_numpy()
+        heatmap[y, x] = section_celldata.coverage.to_numpy()
         ax.imshow(thumb)
         ax.imshow(heatmap, cmap=ExperimentDataAnnotator.transparent_cmap(plt.get_cmap('hot')))
         return {}, matplotlib.cm.ScalarMappable(
