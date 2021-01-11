@@ -45,7 +45,7 @@ def violinplot(ax, structure_data, col):
 def prepare_structure_data(data, structure_tree):
     def fill_data(attr, dt, struct, structure_data):
         if len(dt) > 0:
-            for col in ['density', 'area']:
+            for col in ['coverage', 'area']:
                 structure_data[struct][attr][col] = dt[col].to_numpy()
 
     def nested_defaultdict():
@@ -69,9 +69,9 @@ def prepare_structure_data(data, structure_tree):
     return structure_data
 
 
-def display_totals(ax_density, ax_area, bins, data):
-    hist(ax_density, reject_outliers(data.density.to_numpy()), bins=bins)
-    ax_density.set_title("Density")
+def display_totals(ax_coverage, ax_area, bins, data):
+    hist(ax_coverage, reject_outliers(data.coverage.to_numpy()), bins=bins)
+    ax_coverage.set_title("coverage")
     hist(ax_area, reject_outliers(data.area.to_numpy()), bins=bins)
     ax_area.set_title("Area")
 
@@ -84,20 +84,20 @@ def plot_section_histograms(data, structure_tree, bins=50):
     structure_data = prepare_structure_data(data, structure_tree)
 
     for i, struct in enumerate(structure_data.keys()):
-        total_density = np.array([], dtype=float)
+        total_coverage = np.array([], dtype=float)
         total_area = np.array([], dtype=float)
         for attr in structure_data[struct].keys():
             data_slice = structure_data[struct][attr]
-            total_density = np.concatenate((total_density, data_slice['density']))
+            total_coverage = np.concatenate((total_coverage, data_slice['coverage']))
             total_area = np.concatenate((total_area, data_slice['area']))
-            hist(axs[i + 1], data_slice['density'], bins=bins, alpha=0.5, label=attr)
+            hist(axs[i + 1], data_slice['coverage'], bins=bins, alpha=0.5, label=attr)
             hist(axs[i + 6], data_slice['area'], bins=bins, alpha=0.5, label=attr)
 
-        hist(axs[i + 1], total_density, bins=bins, alpha=0.5, label="Total")
+        hist(axs[i + 1], total_coverage, bins=bins, alpha=0.5, label="Total")
         hist(axs[i + 6], total_area, bins=bins, alpha=0.5, label="Total")
 
         axs[i + 1].legend()
-        axs[i + 1].set_title(struct + " density")
+        axs[i + 1].set_title(struct + " coverage")
         axs[i + 6].legend()
         axs[i + 6].set_title(struct + " area")
 
@@ -113,7 +113,7 @@ def plot_section_violin_diagram(data, structure_tree, thumb=None, bins=50):
     structure_data = prepare_structure_data(data, structure_tree)
 
     violinplot(axs[2], structure_data, 'area')
-    violinplot(axs[3], structure_data, 'density')
+    violinplot(axs[3], structure_data, 'coverage')
 
     if thumb is not None:
         axs[4].imshow(thumb)
