@@ -176,7 +176,7 @@ class RawDataResultsSelector(widgets.VBox):
             'dense': widgets.SelectMultiple(description="Dense", options=self.
                                             get_column_options(self.data_template.dense)),
             'parameter': widgets.Dropdown(description="Parameter",
-                                          options=['density', 'area', 'perimeter']),
+                                          options=['coverage', 'area', 'perimeter']),
         }
 
         for c, f in self.filter.items():
