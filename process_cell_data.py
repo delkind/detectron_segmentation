@@ -5,12 +5,14 @@ import math
 import operator as op
 import os
 import pickle
+import time
 from collections import defaultdict
 
 import cv2
 import numpy as np
 import pandas
 import scipy.ndimage as ndi
+import simplejson
 from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from shapely.geometry import Polygon
@@ -34,7 +36,12 @@ class ExperimentCellsProcessor(object):
         self.mcc = mcc
         self.id = experiment_id
         mapi = MouseConnectivityApi()
-        self.details = {**details, **(mapi.get_experiment_detail(self.id)[0])}
+        while True:
+            try:
+                self.details = {**details, **(mapi.get_experiment_detail(self.id)[0])}
+                break
+            except simplejson.errors.JSONDecodeError:
+                time.sleep(1.0)
         self.logger = logger
         self.subimages = {i['section_number']: i for i in self.details['sub_images']}
         self.seg_data = np.load(f'{self.brain_seg_data_dir}/{self.id}/{self.id}-sections.npz')['arr_0']
