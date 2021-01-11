@@ -6,6 +6,7 @@ import operator as op
 import os
 import pickle
 import time
+import urllib.error
 from collections import defaultdict
 
 import cv2
@@ -40,7 +41,7 @@ class ExperimentCellsProcessor(object):
             try:
                 self.details = {**details, **(mapi.get_experiment_detail(self.id)[0])}
                 break
-            except simplejson.errors.JSONDecodeError:
+            except simplejson.errors.JSONDecodeError or urllib.error.URLError:
                 time.sleep(1.0)
         self.logger = logger
         self.subimages = {i['section_number']: i for i in self.details['sub_images']}
