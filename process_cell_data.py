@@ -47,13 +47,16 @@ class ExperimentCellsProcessor(object):
         self.subimages = {i['section_number']: i for i in self.details['sub_images']}
         self.seg_data = np.load(f'{self.brain_seg_data_dir}/{self.id}/{self.id}-sections.npz')['arr_0']
         self.structure_tree = self.mcc.get_structure_tree()
-        self.structure_ids = self.get_structure_children()
+        self.structure_ids = self.get_requested_structure_children()
         with open(f'{self.directory}/bboxes.pickle', "rb") as f:
             bboxes = pickle.load(f)
         self.bboxes = {k: v for k, v in bboxes.items() if v}
 
-    def get_structure_children(self):
-        structure_ids = self.structure_tree.descendant_ids(self.parent_struct_id)
+    def get_requested_structure_children(self):
+        return self.get_structure_children(self.parent_struct_id)
+
+    def get_structure_children(self, structure_id):
+        structure_ids = self.structure_tree.descendant_ids(structure_id)
         structure_ids = list(set(functools.reduce(op.add, structure_ids)))
         return structure_ids
 
@@ -157,7 +160,7 @@ class ExperimentCellsProcessor(object):
         celldata_struct = data_frame[data_frame.structure_id.isin(dg_structs)]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
         if not relevant_sections:
-            return {'dense': 0, 'sparse': 0}
+            return {}
 
         dense_masks = np.zeros((self.seg_data.shape[0] * 64 // scale, self.seg_data.shape[1] * 64 // scale,
                                 max(relevant_sections) - min(relevant_sections) + 1), dtype=np.uint8)
@@ -194,7 +197,7 @@ class ExperimentCellsProcessor(object):
             [np.isin(self.seg_data[:, :, i], [10703, 10704, 632]).sum() * (self.subimages[i]['resolution'] * 64) ** 2
              for i in relevant_sections])
 
-        return {'dense': dense_dg_area, 'sparse': dg_area - dense_dg_area}
+        return {632: {'dense': dense_dg_area, 'sparse': dg_area - dense_dg_area}}
 
     def detect_dense_ca(self, csv):
         structures_including_dense = [f'Field CA{i}' for i in range(1, 4)]
@@ -203,7 +206,7 @@ class ExperimentCellsProcessor(object):
         celldata_structs = csv[csv.structure_id.isin(structures_including_dense)]
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
         if not relevant_sections:
-            return {403: {'dense': 0, 'sparse': 0}}
+            return {}
 
         dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
                                 max(relevant_sections) - min(relevant_sections) + 1,
@@ -233,6 +236,17 @@ class ExperimentCellsProcessor(object):
 
         return areas
 
+    def calculate_areas_amygdala(self, csv):
+        amygdala_structs = self.get_structure_children([403])
+        celldata_structs = csv[csv.structure_id.isin(amygdala_structs)]
+        relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
+
+        area = np.sum(
+            [np.isin(self.seg_data[:, :, i], amygdala_structs).sum() * (self.subimages[i]['resolution'] * 64) ** 2
+             for i in relevant_sections])
+
+        return {403: {'dense': 0, 'sparse': area}}
+
     def process(self):
         self.logger.info(f"Extracting cell data for {self.id}...")
         sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
@@ -250,17 +264,15 @@ class ExperimentCellsProcessor(object):
         self.calculate_coverages(cell_dataframe)
         self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
         cell_dataframe['dense'] = False
-        dense_areas = self.detect_dense_ca(cell_dataframe)
+        dense_areas_ca = self.detect_dense_ca(cell_dataframe)
 
         self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
-        dense_areas[632] = self.detect_dense_dg(cell_dataframe)
+        dense_areas_dg = self.detect_dense_dg(cell_dataframe)
         self.logger.info(f"Saving cell data for {self.id}...")
         cell_dataframe.to_parquet(f'{self.directory}/celldata-{self.id}.parquet')
 
-        cell_dataframe = pandas.DataFrame({f: self.details[f] for f in self.experiment_fields_to_save})
-        cell_dataframe.to_csv(f'{self.directory}/experimentdata-{self.id}.csv', index=False)
         with open(f'{self.directory}/areas.pickle', 'wb') as f:
-            pickle.dump(dense_areas, file=f)
+            pickle.dump({**dense_areas_dg, **dense_areas_ca, **self.calculate_areas_amygdala(cell_dataframe)}, file=f)
 
     def get_cell_mask(self, section, offset_x, offset_y, w, h, mask):
         cell_mask_file_name = os.path.join(self.directory,
