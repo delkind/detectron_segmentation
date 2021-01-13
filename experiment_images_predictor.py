@@ -94,10 +94,10 @@ class ExperimentImagesPredictor(DirWatcher):
         self.logger.info(f"Experiment {experiment_id}: processing section {section}...")
         for bbox in bboxes:
             x, y, w, h = bbox.scale(64)
-            image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
-                               cv2.IMREAD_GRAYSCALE)
             cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png'
             if not os.path.isfile(cellmask_fname):
+                image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
+                                   cv2.IMREAD_GRAYSCALE)
                 img_mask = self.predict_cells(image, mask, x, y)
                 cv2.imwrite(cellmask_fname,
                             np.stack([np.zeros_like(img_mask), img_mask, np.zeros_like(img_mask)], axis=2))
