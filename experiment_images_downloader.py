@@ -88,16 +88,20 @@ class ExperimentImagesDownloader(DirWatcher):
         url += f'&top={y}&left={x}&width={w}&height={h}'
         filename = f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg'
         for retries in range(3):
-            fname, _ = self.retrieve_url(filename, url)
-            try:
-                image = Image.open(fname)
-                image.verify()
-                break
-            except Exception as e:
-                os.remove(fname)
-                self.logger.info(f"Corrupted file {fname}, re-downloading {filename}")
-                if retries == 2:
-                    raise e
+            fname, _, downloaded = self.retrieve_url(filename, url)
+            if downloaded:
+                try:
+                    image = Image.open(fname)
+                    image.load()
+                    break
+                except OSError or FileNotFoundError as e:
+                    os.remove(fname)
+                    if retries == 2:
+                        raise e
+                    else:
+                        self.logger.info(f"Corrupted file {fname}, re-downloading {filename}")
+            else:
+                self.logger.info(f"Cached version of {filename} used, skipping verification")
 
         return filename
 
@@ -105,13 +109,13 @@ class ExperimentImagesDownloader(DirWatcher):
         url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
               f'mime=1&zoom={2}&&filter=range&filterVals=0,534,0,1006,0,4095'
         filename = f'{directory}/thumbnail-{experiment_id}-{section}.jpg'
-        filename, _ = self.retrieve_url(filename, url)
+        filename, _, _ = self.retrieve_url(filename, url)
         return filename
 
     def retrieve_url(self, filename, url, retries=10):
         if os.path.isfile(filename):
             self.logger.info(f"File {filename} already downloaded")
-            return filename, None
+            return filename, None, False
 
         backoff = 0
         urllib.request.urlcleanup()
@@ -120,7 +124,7 @@ class ExperimentImagesDownloader(DirWatcher):
                 time.sleep(2 ** backoff)
                 fname, msg = urllib.request.urlretrieve(url, filename=f'{filename}.partial')
                 os.replace(fname, filename)
-                return filename, msg
+                return filename, msg, True
             except urllib.error.HTTPError as e:
                 backoff += 1
                 if 500 <= e.code < 600 and retries > 0:

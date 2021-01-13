@@ -96,9 +96,13 @@ class ExperimentImagesPredictor(DirWatcher):
             x, y, w, h = bbox.scale(64)
             image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
                                cv2.IMREAD_GRAYSCALE)
-            img_mask = self.predict_cells(image, mask, x, y)
-            cv2.imwrite(f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png',
-                        np.stack([np.zeros_like(img_mask), img_mask, np.zeros_like(img_mask)], axis=2))
+            cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png'
+            if not os.path.isfile(cellmask_fname):
+                img_mask = self.predict_cells(image, mask, x, y)
+                cv2.imwrite(cellmask_fname,
+                            np.stack([np.zeros_like(img_mask), img_mask, np.zeros_like(img_mask)], axis=2))
+            else:
+                self.logger.info(f"{cellmask_fname} already exists, skipping segmentation...")
 
     def predict_cells(self, image, section_mask, x, y):
         crops = create_crops_list(self.border_size, self.crop_size, image)
