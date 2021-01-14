@@ -1,8 +1,11 @@
 import os
 import pickle
 import shutil
+import sys
+from multiprocessing import Pool
 
 import pandas as pd
+from tqdm import tqdm
 
 
 def merge_boxes(main_dir, source_dir):
@@ -36,7 +39,8 @@ def merge_celldata(main_dir, source_dir, experiment_id):
     celldata_merged.to_parquet(f'{main_dir}/celldata-{experiment_id}.parquet')
 
 
-def merge_experiment(main_dir, source_dir, experiment_id):
+def merge_experiment(t):
+    main_dir, source_dir, experiment_id = t
     merge_boxes(main_dir, source_dir)
     merge_areas(main_dir, source_dir)
     merge_celldata(main_dir, source_dir, experiment_id)
@@ -50,4 +54,19 @@ def merge_experiment(main_dir, source_dir, experiment_id):
             shutil.copy(f'{source_dir}/{f}', f'{main_dir}/{f}')
 
 
-merge_experiment('./output/hippo_exp/analyzed/100140949', './output/amygdala/analyzed/100140949', 100140949)
+def merge_experiments(main_dir, source_dir):
+    main_experiments = os.listdir(main_dir)
+    experiments = [(f'{main_dir}/{i}', f'{source_dir}/{i}', i) for i in os.listdir(source_dir)
+                   if os.path.isdir(f'{source_dir}/{i}') and i in main_experiments]
+
+    pool = Pool(16)
+    results = list(tqdm(pool.imap(merge_experiment, experiments),
+                        "Processing experiments",
+                        total=len(experiments)))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <main_dir> <source_dir>")
+        sys.exit(-1)
+    merge_experiments(sys.argv[1], sys.argv[2])
