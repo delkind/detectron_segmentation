@@ -44,7 +44,8 @@ def calculate_stats(cells, area):
     return result
 
 
-def aggregate_experiment(experiment, data_dir):
+def aggregate_experiment(t):
+    experiment, data_dir = t
     result = infinite_dict()
     cells = retrieve_celldata(experiment, data_dir)
     areas = pickle.load(open(os.path.join(f'{data_dir}/{experiment}', f'areas.pickle'), 'rb'))
@@ -80,7 +81,7 @@ def retrieve_celldata(experiment, data_dir):
 
 
 def perform_aggregation(data_dir):
-    experiments = [i for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
+    experiments = [(i, data_dir) for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
     stats_path = f'{data_dir}/../stats.pickle'
     results = create_stats(experiments)
     with open(stats_path, 'wb') as f:
