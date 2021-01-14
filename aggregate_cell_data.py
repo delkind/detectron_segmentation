@@ -11,7 +11,7 @@ from util import infinite_dict
 
 
 def create_stats(experiments):
-    pool = Pool(16)
+    pool = Pool(1)
     results = list(tqdm(pool.imap(aggregate_experiment, experiments),
                         "Processing experiments",
                         total=len(experiments)))
@@ -46,33 +46,36 @@ def calculate_stats(cells, area):
 
 def aggregate_experiment(t):
     experiment, data_dir = t
-    result = infinite_dict()
-    cells = retrieve_celldata(experiment, data_dir)
-    areas = pickle.load(open(os.path.join(f'{data_dir}/{experiment}', f'areas.pickle'), 'rb'))
-    sections = sorted(cells[cells.structure_id != 403].section.unique().tolist())
-    result['total'] = calculate_stats(cells, sum([sum([areas[s][d] for s in areas.keys()])
-                                                  for d in ['sparse', 'dense']]))
-    result['total']['section_count'] = len(sections)
+    try:
+        result = infinite_dict()
+        cells = retrieve_celldata(experiment, data_dir)
+        areas = pickle.load(open(os.path.join(f'{data_dir}/{experiment}', f'areas.pickle'), 'rb'))
+        sections = sorted(cells[cells.structure_id != 403].section.unique().tolist())
+        result['total'] = calculate_stats(cells, sum([sum([areas[s][d] for s in areas.keys()])
+                                                      for d in ['sparse', 'dense']]))
+        result['total']['section_count'] = len(sections)
 
-    for i, struct in enumerate([382, 423, 463]):
-        result['dense'][f'CA{i + 1}'] = calculate_stats(cells[(cells.structure_id == struct) & cells.dense],
-                                                        areas[struct]['dense'])
-        result['sparse'][f'CA{i + 1}'] = calculate_stats(cells[(cells.structure_id == struct) & (cells.dense == False)],
-                                                         areas[struct]['sparse'])
-        result['region'][f'CA{i + 1}'] = calculate_stats(cells[(cells.structure_id == struct)],
-                                                         areas[struct]['dense'] + areas[struct]['sparse'])
+        for i, struct in enumerate([382, 423, 463]):
+            result['dense'][f'CA{i + 1}'] = calculate_stats(cells[(cells.structure_id == struct) & cells.dense],
+                                                            areas[struct]['dense'])
+            result['sparse'][f'CA{i + 1}'] = calculate_stats(cells[(cells.structure_id == struct) & (cells.dense == False)],
+                                                             areas[struct]['sparse'])
+            result['region'][f'CA{i + 1}'] = calculate_stats(cells[(cells.structure_id == struct)],
+                                                             areas[struct]['dense'] + areas[struct]['sparse'])
 
-    result['dense']['DG'] = calculate_stats(cells[cells.structure_id == 632], areas[632]['dense'])
-    result['sparse']['DG'] = calculate_stats(cells[cells.structure_id.isin([10703, 10704])], areas[632]['sparse'])
-    result['region']['DG'] = calculate_stats(cells[cells.structure_id.isin([10703, 10704, 632])],
-                                             areas[632]['sparse'] + areas[632]['dense'])
+        result['dense']['DG'] = calculate_stats(cells[cells.structure_id == 632], areas[632]['dense'])
+        result['sparse']['DG'] = calculate_stats(cells[cells.structure_id.isin([10703, 10704])], areas[632]['sparse'])
+        result['region']['DG'] = calculate_stats(cells[cells.structure_id.isin([10703, 10704, 632])],
+                                                 areas[632]['sparse'] + areas[632]['dense'])
 
-    cells_mea = cells[(cells.structure_id == 403)]
-    result['dense']['MEA'] = calculate_stats(cells_mea[cells_mea.dense], areas[403]['dense'])
-    result['sparse']['MEA'] = calculate_stats(cells_mea[cells_mea.dense == False], areas[403]['sparse'])
-    result['region']['MEA'] = calculate_stats(cells_mea, areas[403]['sparse'] + areas[403]['dense'])
-
-    return experiment, result
+        cells_mea = cells[(cells.structure_id == 403)]
+        result['dense']['MEA'] = calculate_stats(cells_mea[cells_mea.dense], areas[403]['dense'])
+        result['sparse']['MEA'] = calculate_stats(cells_mea[cells_mea.dense == False], areas[403]['sparse'])
+        result['region']['MEA'] = calculate_stats(cells_mea, areas[403]['sparse'] + areas[403]['dense'])
+        return experiment, result
+    except Exception as e:
+        print(f"Exception in experiment {experiment}")
+        raise e
 
 
 def retrieve_celldata(experiment, data_dir):
