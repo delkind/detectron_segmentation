@@ -294,26 +294,26 @@ class ExperimentCellsProcessor(object):
         return dense_masks_dict
 
     def process(self):
-        if os.path.isfile(f'{self.directory}/temp-celldata-{self.id}.parquet'):
-            cell_dataframe = pandas.read_parquet(f'{self.directory}/temp-celldata-{self.id}.parquet')
-            density3d_maps = pickle.load(bz2.open(f'{self.directory}/temp-densemaps.pickle.bz2', 'rb'))
-        else:
-            self.logger.info(f"Extracting cell data for {self.id}...")
-            sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
-            section_data = list()
-            cell_data = list()
-            for section in sections:
-                cells, sec = self.process_section(section)
-                section_data.append(sec)
-                cell_data += cells
+        # if os.path.isfile(f'{self.directory}/temp-celldata-{self.id}.parquet'):
+        #     cell_dataframe = pandas.read_parquet(f'{self.directory}/temp-celldata-{self.id}.parquet')
+        #     density3d_maps = pickle.load(bz2.open(f'{self.directory}/temp-densemaps.pickle.bz2', 'rb'))
+        # else:
+        self.logger.info(f"Extracting cell data for {self.id}...")
+        sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
+        section_data = list()
+        cell_data = list()
+        for section in sections:
+            cells, sec = self.process_section(section)
+            section_data.append(sec)
+            cell_data += cells
 
-            cell_dataframe = pandas.DataFrame(section_data)
-            cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
-            cell_dataframe = pandas.DataFrame(cell_data)
-            self.logger.info(f"Calculating density maps for {self.id}...")
-            density3d_maps = self.calculate_density3d(cell_dataframe)
-            self.logger.info(f"Calculating coverages for {self.id}...")
-            self.calculate_coverages(cell_dataframe)
+        cell_dataframe = pandas.DataFrame(section_data)
+        cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
+        cell_dataframe = pandas.DataFrame(cell_data)
+        self.logger.info(f"Calculating density maps for {self.id}...")
+        density3d_maps = self.calculate_density3d(cell_dataframe)
+        self.logger.info(f"Calculating coverages for {self.id}...")
+        self.calculate_coverages(cell_dataframe)
 
         self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
         cell_dataframe['dense'] = False
