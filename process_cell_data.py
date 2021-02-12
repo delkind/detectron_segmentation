@@ -1,5 +1,6 @@
 import argparse
 import ast
+import bz2
 import functools
 import math
 import operator as op
@@ -7,7 +8,7 @@ import os
 import pickle
 import time
 import urllib.error
-from collections import defaultdict
+from itertools import groupby
 
 import cv2
 import numpy as np
@@ -87,6 +88,37 @@ class ExperimentCellsProcessor(object):
                                   centroids_x[i] - 32: centroids_x[i] + 32].sum() for i in range(len(centroids_y))])
             csv.at[csv.section == section, 'coverage'] = coverages / 4096
 
+    def calculate_density3d(self, csv):
+        csv['density3d'] = 0
+        min_section = csv.section.unique().min()
+        densities3d = np.zeros((self.seg_data.shape[0] * 2, self.seg_data.shape[1] * 2,
+                                csv.section.unique().max() - min_section + 1), dtype=float)
+        for section in sorted(np.unique(csv.section)):
+            csv_section = csv[csv.section == section]
+            self.logger.debug(f"Calculating 3d density for experiment {self.id} section {section}")
+            centroids_y = (csv_section.centroid_y.to_numpy().astype(int) // 32).tolist()
+            centroids_x = (csv_section.centroid_x.to_numpy().astype(int) // 32).tolist()
+            radii = np.sqrt(csv_section.area.to_numpy() / math.pi)
+            radii = list(zip(centroids_y, centroids_x, radii))
+            radii = {label: tuple(r for _, _, r in value) for (label, value) in
+                     groupby(radii, lambda x: (x[0], x[1]))}
+            y, x, r = zip(*[(y, x, r) for (y, x), r in radii.items()])
+
+            value = np.empty((), dtype=object)
+            value[()] = ()
+            radii = np.full((self.seg_data.shape[0] * 2, self.seg_data.shape[1] * 2), value, dtype=object)
+
+            radii[y, x] = r
+            radii = [np.roll(radii, (i, j), (0, 1)) for i in range(-5, 5) for j in range(-5, 5)]
+            radii = functools.reduce(np.add, radii)
+            compute_avg = np.vectorize(lambda t: sum(t)/len(t) if len(t) > 0 else 0, otypes=[float])
+            compute_count = np.vectorize(lambda t: len(t))
+            counts = compute_count(radii)
+            radii = compute_avg(radii)
+            densities3d[:, :, section - min_section] = counts / (((0.35 * 320) ** 2) * (1.5 + 2 * (radii - 0.5)))
+
+        return min_section, csv.section.unique().max(), densities3d
+
     def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
         scale = 64 // (dense_masks.shape[0] // self.seg_data.shape[0])
         for section in relevant_sections:
@@ -104,7 +136,7 @@ class ExperimentCellsProcessor(object):
                     dense = 1
                 else:
                     dense = np.argmax([coverages[yhat == 0].mean(), coverages[yhat == 1].mean()])
-                if scale < 8:
+                if scale <= 8:
                     dense_masks[:, :, section - min(relevant_sections)] = self.produce_precise_dense_mask(
                         celldata_section, centroids_x, centroids_y, dense, dense_masks, scale, yhat)
                 else:
@@ -157,122 +189,148 @@ class ExperimentCellsProcessor(object):
     def detect_dense_dg(self, data_frame):
         dg_structs = [10703, 10704, 632]
         scale = 4
-        celldata_struct = data_frame[data_frame.structure_id.isin(dg_structs)]
+        scaling_factor = 64 // scale
+        celldata_indices = data_frame.index[data_frame.structure_id.isin(dg_structs)]
+        celldata_struct = data_frame.iloc[celldata_indices]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
         if not relevant_sections:
-            return {}
+            return ()
 
-        dense_masks = np.zeros((self.seg_data.shape[0] * 64 // scale, self.seg_data.shape[1] * 64 // scale,
+        dense_masks = np.zeros((self.seg_data.shape[0] * scaling_factor, self.seg_data.shape[1] * scaling_factor,
                                 max(relevant_sections) - min(relevant_sections) + 1), dtype=np.uint8)
 
         self.build_dense_masks(celldata_struct, dense_masks, relevant_sections)
         # self.plot_coverage_masks(data_frame, dense_masks, relevant_sections)
 
-        centroids_y = celldata_struct.centroid_y.to_numpy().astype(int) // scale
-        centroids_x = celldata_struct.centroid_x.to_numpy().astype(int) // scale
-        sections = celldata_struct.section.to_numpy().astype(int)
-        data_frame.at[data_frame.structure_id.isin(dg_structs), 'dense'] = \
-            dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
+        dense_masks = dense_masks * 632
 
-        data_frame.at[data_frame.structure_id.isin([10703, 10704]) & data_frame.dense, 'structure_id'] = 632
+        for section in sorted(relevant_sections):
+            self.logger.debug(f"Processing DG dense areas for section {section}")
+            sparse_seg_data_section = np.zeros_like(dense_masks[:, :, section - min(relevant_sections)])
+            for r in dg_structs:
+                x, y = np.where(self.seg_data[:, :, section] == r)
+                locs = [[x * scaling_factor + i, y * scaling_factor + j] for i in
+                        range(scaling_factor) for j in range(scaling_factor)]
+                x, y = list(zip(*locs))
+                x = np.concatenate(x)
+                y = np.concatenate(y)
+                sparse_seg_data_section[x, y] = r
 
-        sparse = data_frame[(data_frame.structure_id == 632) & (data_frame.dense == False)]
-        sparse_neighbours = data_frame[data_frame.structure_id.isin([10703, 10704])]
+            sparse_locs = np.where(np.logical_and(sparse_seg_data_section != 632, sparse_seg_data_section != 0))
+            x = np.stack(sparse_locs).swapaxes(0, 1)
+            y = sparse_seg_data_section[sparse_locs]
 
-        x = np.stack((sparse_neighbours.centroid_x.to_numpy(), sparse_neighbours.centroid_y.to_numpy())).swapaxes(0, 1)
-        y = sparse_neighbours.structure_id.to_numpy()
+            neigh = KNeighborsClassifier(n_neighbors=3)
+            neigh.fit(x, y)
 
-        neigh = KNeighborsClassifier(n_neighbors=3)
-        neigh.fit(x, y)
+            sparse_locs = np.where(sparse_seg_data_section[:, :] == 632)
+            x = np.stack(sparse_locs).swapaxes(0, 1)
+            sparse_seg_data_section[sparse_locs] = neigh.predict(x)
 
-        x = np.stack((sparse.centroid_x.to_numpy(), sparse.centroid_y.to_numpy())).swapaxes(0, 1)
-        y = neigh.predict(x).tolist()
+            sparse_locs = dense_masks[:, :, section - min(relevant_sections)] == 0
+            dense_masks[sparse_locs, section - min(relevant_sections)] = sparse_seg_data_section[sparse_locs]
 
-        data_frame.at[(data_frame.structure_id == 632) & (data_frame.dense == False), 'structure_id'] = y
+        centroids_y = data_frame.centroid_y.to_numpy().astype(int) // scale
+        centroids_x = data_frame.centroid_x.to_numpy().astype(int) // scale
+        sections = data_frame.section.to_numpy().astype(int) - min(relevant_sections)
 
-        dense_dg_area = np.sum([dense_masks[:, :, i].sum() * (self.subimages[min(relevant_sections) + i]
-                                                                ['resolution'] * 4) ** 2 for i in
-                             range(dense_masks.shape[2])])
-        dg_area = np.sum(
-            [np.isin(self.seg_data[:, :, i], [10703, 10704, 632]).sum() * (self.subimages[i]['resolution'] * 64) ** 2
-             for i in relevant_sections])
+        cells_values = dense_masks[centroids_y[celldata_indices], centroids_x[celldata_indices],
+                                   sections[celldata_indices]]
+        nonzero_indices = celldata_indices[cells_values != 0]
 
-        return {632: {'dense': dense_dg_area, 'sparse': dg_area - dense_dg_area}}
+        data_frame.iloc[nonzero_indices, data_frame.columns.get_loc('structure_id')] = cells_values[cells_values != 0]
+
+        data_frame.at[data_frame.structure_id == 632, 'dense'] = True
+        data_frame.at[data_frame.structure_id.isin([10703, 10704]), 'dense'] = False
+
+        return {r: (min(relevant_sections), max(relevant_sections), dense_masks.shape, np.where(dense_masks == r))
+                for r in dg_structs}
 
     def detect_dense_ca(self, csv):
+        scale = 8
+        scaling_factor = 64 // scale
+
         structures_including_dense = [f'Field CA{i}' for i in range(1, 4)]
+        dense_struct_ids = [r['id'] for r in
+                            self.structure_tree.get_structures_by_name([s + ', pyramidal layer'
+                                                                        for s in structures_including_dense])]
         structures_including_dense = [r['id'] for r in
                                       self.structure_tree.get_structures_by_name(structures_including_dense)]
         celldata_structs = csv[csv.structure_id.isin(structures_including_dense)]
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
         if not relevant_sections:
-            return {}
+            return ()
 
-        dense_masks = np.zeros((self.seg_data.shape[0], self.seg_data.shape[1],
+        dense_masks = np.zeros((self.seg_data.shape[0] * scaling_factor, self.seg_data.shape[1] * scaling_factor,
                                 max(relevant_sections) - min(relevant_sections) + 1,
                                 len(structures_including_dense)), dtype=int)
 
-        areas = defaultdict(dict)
+        dense_masks_dict = dict()
 
         for ofs, structure in enumerate(structures_including_dense):
             celldata_struct = celldata_structs[celldata_structs.structure_id.isin([structure])]
             self.build_dense_masks(celldata_struct, dense_masks[:, :, :, ofs], relevant_sections)
-            dense_area = np.sum([dense_masks[:, :, i, ofs].sum() * (self.subimages[min(relevant_sections) + i]
-                                                                    ['resolution'] * 64) ** 2 for i in
-                                 range(dense_masks.shape[2])])
-            total_area = np.sum(
-                [(self.seg_data[:, :, i] == structure).sum() * (self.subimages[i]['resolution'] * 64) ** 2
-                 for i in relevant_sections])
-            areas[structure] = {'dense': dense_area, 'sparse': total_area - dense_area}
+            dense_masks_dict[dense_struct_ids[ofs]] = \
+                (min(relevant_sections), max(relevant_sections), dense_masks[:, :, :, ofs].shape,
+                 np.where(dense_masks[:, :, :, ofs] != 0))
+
+        # slc = self.seg_data[:, :, min(relevant_sections): max(relevant_sections) + 1]
+        # for i, s in enumerate(dense_struct_ids):
+        #     locs_mask = (dense_masks[:, :, :, i] != 0)
+        #     slc[locs_mask] = s
 
         dense_masks = dense_masks.sum(axis=3) != 0
         # self.plot_coverage_masks(csv, dense_masks, relevant_sections)
 
-        centroids_y = celldata_structs.centroid_y.to_numpy().astype(int) // 64
-        centroids_x = celldata_structs.centroid_x.to_numpy().astype(int) // 64
+        centroids_y = celldata_structs.centroid_y.to_numpy().astype(int) // scale
+        centroids_x = celldata_structs.centroid_x.to_numpy().astype(int) // scale
         sections = celldata_structs.section.to_numpy().astype(int)
         csv.at[csv.structure_id.isin(structures_including_dense), 'dense'] = \
             dense_masks[centroids_y, centroids_x, sections - min(relevant_sections)].astype(bool)
 
-        return areas
+        for i, s in enumerate(dense_struct_ids):
+            csv.at[(csv.structure_id == structures_including_dense[i]) & csv.dense, 'structure_id'] = s
 
-    def calculate_areas_amygdala(self, csv):
-        amygdala_structs = self.get_structure_children([403])
-        celldata_structs = csv[csv.structure_id.isin(amygdala_structs)]
-        relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
-
-        area = np.sum(
-            [np.isin(self.seg_data[:, :, i], amygdala_structs).sum() * (self.subimages[i]['resolution'] * 64) ** 2
-             for i in relevant_sections])
-
-        return {403: {'dense': 0, 'sparse': area}}
+        return dense_masks_dict
 
     def process(self):
-        self.logger.info(f"Extracting cell data for {self.id}...")
-        sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
-        section_data = list()
-        cell_data = list()
-        for section in sections:
-            cells, sec = self.process_section(section)
-            section_data.append(sec)
-            cell_data += cells
+        if os.path.isfile(f'{self.directory}/temp-celldata-{self.id}.parquet'):
+            cell_dataframe = pandas.read_parquet(f'{self.directory}/temp-celldata-{self.id}.parquet')
+            density3d_maps = pickle.load(bz2.open(f'{self.directory}/temp-densemaps.pickle.bz2', 'rb'))
+        else:
+            self.logger.info(f"Extracting cell data for {self.id}...")
+            sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
+            section_data = list()
+            cell_data = list()
+            for section in sections:
+                cells, sec = self.process_section(section)
+                section_data.append(sec)
+                cell_data += cells
 
-        cell_dataframe = pandas.DataFrame(section_data)
-        cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
-        cell_dataframe = pandas.DataFrame(cell_data)
-        self.logger.info(f"Calculating coverages for {self.id}...")
-        self.calculate_coverages(cell_dataframe)
+            cell_dataframe = pandas.DataFrame(section_data)
+            cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
+            cell_dataframe = pandas.DataFrame(cell_data)
+            self.logger.info(f"Calculating density maps for {self.id}...")
+            density3d_maps = self.calculate_density3d(cell_dataframe)
+            self.logger.info(f"Calculating coverages for {self.id}...")
+            self.calculate_coverages(cell_dataframe)
+
         self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
         cell_dataframe['dense'] = False
-        dense_areas_ca = self.detect_dense_ca(cell_dataframe)
+
+        dense_masks = [self.detect_dense_ca(cell_dataframe)]
 
         self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
-        dense_areas_dg = self.detect_dense_dg(cell_dataframe)
+        dense_masks += [self.detect_dense_dg(cell_dataframe)]
         self.logger.info(f"Saving cell data for {self.id}...")
         cell_dataframe.to_parquet(f'{self.directory}/celldata-{self.id}.parquet')
 
-        with open(f'{self.directory}/areas.pickle', 'wb') as f:
-            pickle.dump({**dense_areas_dg, **dense_areas_ca, **self.calculate_areas_amygdala(cell_dataframe)}, file=f)
+        with bz2.open(f'{self.directory}/maps.pickle.bz2', 'wb') as f:
+            maps = {
+                'dense_masks': functools.reduce(lambda x, y: {**x, **y}, dense_masks),
+                'density3d_maps': density3d_maps
+            }
+            pickle.dump(maps, file=f)
 
     def get_cell_mask(self, section, offset_x, offset_y, w, h, mask):
         cell_mask_file_name = os.path.join(self.directory,
