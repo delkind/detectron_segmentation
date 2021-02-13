@@ -216,16 +216,17 @@ class ExperimentCellsProcessor(object):
                 y = np.concatenate(y)
                 sparse_seg_data_section[x, y] = r
 
-            sparse_locs = np.where(np.logical_and(sparse_seg_data_section != 632, sparse_seg_data_section != 0))
-            x = np.stack(sparse_locs).swapaxes(0, 1)
-            y = sparse_seg_data_section[sparse_locs]
+            dense_locs = np.where(sparse_seg_data_section[:, :] == 632)
+            if dense_locs[0].shape[0] > 0:
+                sparse_locs = np.where(np.logical_and(sparse_seg_data_section != 632, sparse_seg_data_section != 0))
+                x = np.stack(sparse_locs).swapaxes(0, 1)
+                y = sparse_seg_data_section[sparse_locs]
 
-            neigh = KNeighborsClassifier(n_neighbors=3)
-            neigh.fit(x, y)
+                neigh = KNeighborsClassifier(n_neighbors=3)
+                neigh.fit(x, y)
 
-            sparse_locs = np.where(sparse_seg_data_section[:, :] == 632)
-            x = np.stack(sparse_locs).swapaxes(0, 1)
-            sparse_seg_data_section[sparse_locs] = neigh.predict(x)
+                x = np.stack(sparse_locs).swapaxes(0, 1)
+                sparse_seg_data_section[sparse_locs] = neigh.predict(x)
 
             sparse_locs = dense_masks[:, :, section - min(relevant_sections)] == 0
             dense_masks[sparse_locs, section - min(relevant_sections)] = sparse_seg_data_section[sparse_locs]
