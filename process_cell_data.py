@@ -344,16 +344,18 @@ class ExperimentCellsProcessor(object):
         cnts = [poly for poly in cnts if mask[int(poly.centroid.y) // 64, int(poly.centroid.x) // 64]]
         return cnts
 
-    def get_brain_area(self, section):
+    def get_brain_metrics(self, section):
         thumbnail_file_name = os.path.join(self.directory, f'thumbnail-{self.id}-{section}.jpg')
         thumbnail = cv2.imread(thumbnail_file_name, cv2.IMREAD_GRAYSCALE)
         brain_mask, bbox, ctrs = detect_brain(thumbnail)
         brain_area = sum([Polygon(ctr.squeeze()).area for ctr in ctrs])
-        return brain_area
+        return brain_area, bbox
 
     def process_section(self, section):
-        brain_area = self.get_brain_area(section)
+        brain_area, brain_bbox = self.get_brain_metrics(section)
         struct_mask = self.get_structure_mask(section)
+
+        brain_bbox = brain_bbox.scale(64)
 
         self.logger.debug(f"Experiment: {self.id}, processing section {section}...")
         struct_area = struct_mask.sum()
@@ -362,7 +364,7 @@ class ExperimentCellsProcessor(object):
 
         for offset_x, offset_y, w, h in map(lambda b: b.scale(64), self.bboxes[section]):
             cells = self.get_cell_mask(section, offset_x, offset_y, w, h, struct_mask)
-            box_cell_data = self.polygons_to_cell_data(cells, section)
+            box_cell_data = self.polygons_to_cell_data(cells, section, brain_bbox.x + brain_bbox.w // 2)
             cells_data += box_cell_data
 
         return cells_data, {
@@ -372,10 +374,11 @@ class ExperimentCellsProcessor(object):
             'struct_area': struct_area * ((self.subimages[section]['resolution'] * 64) ** 2)
         }
 
-    def polygons_to_cell_data(self, cells, section):
+    def polygons_to_cell_data(self, cells, section, center_x):
         struct_ids = [self.get_struct_id(cell, section) for cell in cells]
         box_cell_data = [{'section': section, 'structure_id': struct_id, 'centroid_x': int(cell.centroid.x),
                           'centroid_y': int(cell.centroid.y),
+                          'side': 'left' if cell.centroid.x <= center_x else 'right',
                           'area': cell.area * (self.subimages[section]['resolution'] ** 2),
                           'perimeter': cell.length * self.subimages[section]['resolution'], } for cell, struct_id in
                          zip(cells, struct_ids) if struct_id in self.structure_ids]
