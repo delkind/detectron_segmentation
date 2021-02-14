@@ -42,7 +42,7 @@ class ExperimentCellsProcessor(object):
             try:
                 self.details = {**details, **(mapi.get_experiment_detail(self.id)[0])}
                 break
-            except simplejson.errors.JSONDecodeError or urllib.error.URLError:
+            except simplejson.errors.JSONDecodeError or urllib.error.URLError or urllib.error.URLError:
                 time.sleep(1.0)
         self.logger = logger
         self.subimages = {i['section_number']: i for i in self.details['sub_images']}
