@@ -122,6 +122,7 @@ class ExperimentCellsProcessor(object):
     def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
         scale = 64 // (dense_masks.shape[0] // self.seg_data.shape[0])
         for section in relevant_sections:
+            self.logger.debug(f"Analyzing section {section}")
             celldata_section = celldata_struct[celldata_struct.section == section]
             centroids_x = (celldata_section.centroid_x.to_numpy() // scale).astype(int)
             centroids_y = (celldata_section.centroid_y.to_numpy() // scale).astype(int)
@@ -167,7 +168,7 @@ class ExperimentCellsProcessor(object):
             comps = np.argwhere((sums > 10) & ((sums.max() / sums) < 5)).flatten()
             dense_mask = np.isin(dense_mask, comps + 1)
         else:
-            dense_mask = np.zeros_like(self.seg_data[:, :, 0])
+            dense_mask = np.zeros_like(dense_mask)
         return dense_mask
 
     def plot_coverage_masks(self, data_frame, dense_masks, relevant_sections):
