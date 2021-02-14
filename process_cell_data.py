@@ -6,6 +6,7 @@ import math
 import operator as op
 import os
 import pickle
+import socket
 import time
 import urllib.error
 from itertools import groupby
@@ -448,6 +449,15 @@ class CellProcessor(DirWatcher):
         if self.annotate:
             annotator = ExperimentDataAnnotator(int(item), directory, self.logger)
             annotator.process()
+
+    def on_process_error(self, item, exception):
+        retval = super().on_process_error(item, exception)
+        self.logger.error(f"Error occurred during processing", exc_info=True)
+        if type(exception) in [urllib.error.HTTPError, OSError, ValueError,
+                               urllib.error.URLError, socket.gaierror, MemoryError]:
+            return False
+        else:
+            return retval
 
 
 class ExperimentCellAnalyzerTaskManager(ExperimentProcessTaskManager):
