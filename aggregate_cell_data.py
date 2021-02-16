@@ -175,8 +175,7 @@ def retrieve_celldata(experiment, data_dir):
 
 
 def perform_aggregation(data_dir, seg_data_dir):
-    # experiments = [i for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
-    experiments = ['100140949', '127651139']
+    experiments = [i for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
     experiments = [(i, data_dir, seg_data_dir) for i in experiments]
     stats_path = f'{data_dir}/../stats.pickle'
     results = create_stats(experiments)
