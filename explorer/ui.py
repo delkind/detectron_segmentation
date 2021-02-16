@@ -147,6 +147,7 @@ class ResultsSelector(widgets.HBox):
                 else:
                     self.selectors[num + 1].value = self.selectors[num + 1].options[0]
                 self.enable_selector(self.selectors[num + 1], True)
+                self.selectors[num + 1].disabled = len(self.selectors[num + 1].options) < 2
 
     def get_selection(self, relevant_experiments):
         return np.array([retrieve_nested_path(self.data[str(e)],
