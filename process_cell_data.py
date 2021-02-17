@@ -26,6 +26,7 @@ from annotate_cell_data import ExperimentDataAnnotator
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
 from localize_brain import detect_brain
+from util import infinite_dict
 
 
 class ExperimentCellsProcessor(object):
@@ -112,7 +113,7 @@ class ExperimentCellsProcessor(object):
             radii[y, x] = r
             radii = [np.roll(radii, (i, j), (0, 1)) for i in range(-5, 5) for j in range(-5, 5)]
             radii = functools.reduce(np.add, radii)
-            compute_avg = np.vectorize(lambda t: sum(t)/len(t) if len(t) > 0 else 0, otypes=[float])
+            compute_avg = np.vectorize(lambda t: sum(t) / len(t) if len(t) > 0 else 0, otypes=[float])
             compute_count = np.vectorize(lambda t: len(t))
             counts = compute_count(radii)
             radii = compute_avg(radii)
@@ -296,43 +297,115 @@ class ExperimentCellsProcessor(object):
 
         return dense_masks_dict
 
+    def calculate_global_parameters(self, density3d_maps, dense_masks, cells):
+        relevant_sections = cells.section.unique()
+        relevant_sections.sort()
+        globs_per_section = infinite_dict()
+        for section in relevant_sections:
+            self.logger.debug(f"Calculating globals for section {section} of {self.id}...")
+            section_seg_data = self.seg_data[:, :, section]
+            for region, (start, end, shape, (mask_y, mask_x, mask_section)) in dense_masks.items():
+                if start <= section <= end:
+                    if shape[0] < section_seg_data.shape[0]:
+                        ratio = section_seg_data.shape[0] // shape[0]
+                        deltas_x = np.array(([i for i in range(ratio)] * ratio) * len(mask_x))
+                        deltas_y = np.array([[i] * ratio for i in range(ratio)] * len(mask_x))
+                        mask_y = np.kron(mask_y * ratio, np.ones((1, ratio * ratio))).flatten() + deltas_y
+                        mask_x = np.kron(mask_x * ratio, np.ones((1, ratio * ratio))).flatten() + deltas_x
+                    elif shape[0] > section_seg_data.shape[0]:
+                        ratio = shape[0] // section_seg_data.shape[0]
+                        section_seg_data = np.kron(section_seg_data,
+                                                   np.ones((ratio, ratio), dtype=section_seg_data.dtype))
+
+                    relevant_cells = mask_section == (section - start)
+                    section_seg_data[mask_y[relevant_cells], mask_x[relevant_cells]] = region
+
+            section_density_map = density3d_maps[2][:, :, section - density3d_maps[0]]
+
+            if section_density_map.shape[0] > section_seg_data.shape[0]:
+                ratio = section_density_map.shape[0] // section_seg_data.shape[0]
+                section_seg_data = np.kron(section_seg_data, np.ones((ratio, ratio), dtype=section_seg_data.dtype))
+            elif section_density_map.shape[0] < section_seg_data.shape[0]:
+                ratio = section_seg_data.shape[0] // section_density_map.shape[0]
+                section_density_map = np.kron(section_density_map,
+                                              np.ones((ratio, ratio), dtype=section_density_map.dtype))
+
+            _, bbox, _ = detect_brain((section_seg_data != 0).astype(np.uint8) * 255)
+            center_x = bbox.x + bbox.w // 2
+            scale_factor = (0.35 * 64) / (section_seg_data.shape[0] / self.seg_data.shape[0])
+            relevant_regions = np.intersect1d(np.unique(section_seg_data),
+                                              cells[cells.section == section].structure_id.unique())
+            for region in relevant_regions:
+                region_cells = np.where(section_seg_data == region)
+                globs_per_section[region][section]['region_area'] = region_cells[0].shape[0] * (scale_factor ** 2)
+                globs_per_section[region][section]['region_area_left'] = np.where(region_cells[1] < center_x)[0].shape[
+                                                                             0] * (
+                                                                                 scale_factor ** 2)
+                globs_per_section[region][section]['region_area_right'] = \
+                    np.where(region_cells[1] >= center_x)[0].shape[
+                        0] * (
+                            scale_factor ** 2)
+                densities = section_density_map[region_cells].flatten()
+                densities = (densities[densities != 0], len(densities))
+                globs_per_section[region][section]['density3d'] = densities
+
+        return globs_per_section
+
     def process(self):
-        # if os.path.isfile(f'{self.directory}/temp-celldata-{self.id}.parquet'):
-        #     cell_dataframe = pandas.read_parquet(f'{self.directory}/temp-celldata-{self.id}.parquet')
-        #     density3d_maps = pickle.load(bz2.open(f'{self.directory}/temp-densemaps.pickle.bz2', 'rb'))
-        # else:
-        self.logger.info(f"Extracting cell data for {self.id}...")
-        sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
-        section_data = list()
-        cell_data = list()
-        for section in sections:
-            cells, sec = self.process_section(section)
-            section_data.append(sec)
-            cell_data += cells
+        if os.path.isfile(f'{self.directory}/celldata-{self.id}.parquet') \
+                and os.path.isfile(f'{self.directory}/maps.pickle.bz2'):
+            cell_dataframe = pandas.read_parquet(f'{self.directory}/celldata-{self.id}.parquet')
+            maps = pickle.load(bz2.open(f'{self.directory}/maps.pickle.bz2', 'rb'))
+            dense_masks = maps['dense_masks']
+            density3d_maps = maps['density3d_maps']
+        else:
+            self.logger.info(f"Extracting cell data for {self.id}...")
+            sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
+            section_data = list()
+            cell_data = list()
+            for section in sections:
+                cells, sec = self.process_section(section)
+                section_data.append(sec)
+                cell_data += cells
 
-        cell_dataframe = pandas.DataFrame(section_data)
-        cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
-        cell_dataframe = pandas.DataFrame(cell_data)
-        self.logger.info(f"Calculating density maps for {self.id}...")
-        density3d_maps = self.calculate_density3d(cell_dataframe)
-        self.logger.info(f"Calculating coverages for {self.id}...")
-        self.calculate_coverages(cell_dataframe)
+            cell_dataframe = pandas.DataFrame(section_data)
+            cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
+            cell_dataframe = pandas.DataFrame(cell_data)
+            self.logger.info(f"Calculating density maps for {self.id}...")
+            density3d_maps = self.calculate_density3d(cell_dataframe)
+            self.logger.info(f"Calculating coverages for {self.id}...")
+            self.calculate_coverages(cell_dataframe)
 
-        self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
-        cell_dataframe['dense'] = False
+            self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
+            cell_dataframe['dense'] = False
 
-        dense_masks = [self.detect_dense_ca(cell_dataframe)]
+            dense_masks = [self.detect_dense_ca(cell_dataframe)]
 
-        self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
-        dense_masks += [self.detect_dense_dg(cell_dataframe)]
+            self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
+            dense_masks += [self.detect_dense_dg(cell_dataframe)]
+
+            dense_masks = functools.reduce(lambda x, y: {**x, **y}, dense_masks)
+
+        self.logger.info(f"Calculating global parameters for {self.id}...")
+        globs = self.calculate_global_parameters(density3d_maps, dense_masks, cell_dataframe)
+        self.logger.info(f"Converting sparse CA structure IDs for {self.id}...")
+        for struct in ['CA1', 'CA2', 'CA3']:
+            sparse_id = self.mcc.get_structure_tree().get_structures_by_acronym([f'{struct}sr'])[0]['id']
+            generic_id = self.mcc.get_structure_tree().get_structures_by_acronym([struct])[0]['id']
+            cell_dataframe.at[(cell_dataframe.structure_id == generic_id) & (cell_dataframe.dense == False),
+                              'structure_id'] = sparse_id
+            globs[sparse_id] = globs[generic_id]
+            del globs[generic_id]
+
         self.logger.info(f"Saving cell data for {self.id}...")
         cell_dataframe.to_parquet(f'{self.directory}/celldata-{self.id}.parquet')
 
+        self.logger.info(f"Saving global data for {self.id}...")
+        maps = {
+            'dense_masks': dense_masks,
+            'globs': globs
+        }
         with bz2.open(f'{self.directory}/maps.pickle.bz2', 'wb') as f:
-            maps = {
-                'dense_masks': functools.reduce(lambda x, y: {**x, **y}, dense_masks),
-                'density3d_maps': density3d_maps
-            }
             pickle.dump(maps, file=f)
 
     def get_cell_mask(self, section, offset_x, offset_y, w, h, mask):
