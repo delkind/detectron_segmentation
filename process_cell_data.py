@@ -354,6 +354,7 @@ class ExperimentCellsProcessor(object):
     def process(self):
         if os.path.isfile(f'{self.directory}/celldata-{self.id}.parquet') \
                 and os.path.isfile(f'{self.directory}/maps.pickle.bz2'):
+            self.logger.info(f"Loading cell data for {self.id}...")
             cell_dataframe = pandas.read_parquet(f'{self.directory}/celldata-{self.id}.parquet')
             maps = pickle.load(bz2.open(f'{self.directory}/maps.pickle.bz2', 'rb'))
             dense_masks = maps['dense_masks']
