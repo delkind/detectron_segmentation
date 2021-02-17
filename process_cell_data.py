@@ -403,7 +403,7 @@ class ExperimentCellsProcessor(object):
 
         self.logger.info(f"Saving global data for {self.id}...")
         maps = {
-            'dense_masks': dense_masks,
+            'density3d_maps': density3d_maps,
             'globs': globs
         }
         with bz2.open(f'{self.directory}/maps.pickle.bz2', 'wb') as f:
