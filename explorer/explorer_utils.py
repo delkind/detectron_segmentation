@@ -54,7 +54,8 @@ def prepare_structure_data(data, structure_tree):
     structure_data = nested_defaultdict()
 
     for s in ['Field CA1', 'Field CA2', 'Field CA3']:
-        data_struct = data[data.structure_id == structure_tree.get_structures_by_name([s])[0]['id']]
+        relevant_structs = structure_tree().descendant_ids([structure_tree.get_structures_by_name([s])[0]['id']])[0]
+        data_struct = data[data.structure_id.isin(relevant_structs)]
         attr_data = dict()
         attr_data['Dense'] = data_struct[data_struct.dense == True]
         attr_data['Sparse'] = data_struct[data_struct.dense == False]
