@@ -1,3 +1,4 @@
+import base64
 import itertools
 import os
 
@@ -5,7 +6,8 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats as stats
-from IPython.display import display, Markdown
+from IPython.display import display, Markdown, HTML
+import pandas as pd
 
 from explorer.explorer_utils import hist, retrieve_nested_path
 from explorer.ui import ExperimentsSelector, ResultsSelector
@@ -119,6 +121,13 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             self.output.clear_output()
 
             with self.output:
+                df = pd.DataFrame({k: pd.Series(v) for k, v in values.items()})
+                csv = df.to_csv()
+                b64 = base64.b64encode(csv.encode())
+                payload = b64.decode()
+                html = '<a download="{filename}" href="data:text/csv;base64,{payload}" target="_blank">{title}</a>'
+                html = html.format(payload=payload, title="Click to download data", filename='data.csv')
+                display(HTML(html))
                 fig, ax = plt.subplots(1, 1, figsize=(10, 10))
                 for l, d in values.items():
                     hist(ax, d, bins=self.bins.value, label=l)
