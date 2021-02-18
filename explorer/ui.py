@@ -114,8 +114,8 @@ class ResultsSelector(widgets.HBox):
         self.template = list(data.values())[0]
         for s in self.selectors[1:]:
             self.enable_selector(s, False)
-        self.selectors[0].options = list(self.template.keys())
-        self.selectors[0].value = list(self.template.keys())[0]
+        self.selectors[0].options = sorted(list(self.template.keys()))
+        self.selectors[0].value = self.selectors[0].options[0]
         super().__init__(self.selectors)
 
     @staticmethod
@@ -141,7 +141,7 @@ class ResultsSelector(widgets.HBox):
                     self.enable_selector(self.selectors[i], False)
             else:
                 old_value = self.selectors[num + 1].value
-                self.selectors[num + 1].options = list(val.keys())
+                self.selectors[num + 1].options = sorted(list(val.keys()))
                 if old_value in val.keys():
                     self.selectors[num + 1].value = old_value
                 else:
