@@ -1,5 +1,5 @@
 import bz2
-import functools
+import itertools
 import os
 import pickle
 import sys
@@ -7,15 +7,16 @@ from collections import defaultdict
 from multiprocessing import Pool
 
 import pandas as pd
-from tqdm import tqdm
-
-from util import infinite_dict
-
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+from tqdm import tqdm
 
 mcc = MouseConnectivityCache(manifest_file='mouse_connectivity/mouse_connectivity_manifest.json', resolution=25)
 
 acronyms = {v: k for k, v in mcc.get_structure_tree().get_id_acronym_map().items()}
+structs_descendants = {i: set(mcc.get_structure_tree().descendant_ids([i])[0])
+                       for i in set(mcc.get_structure_tree().descendant_ids([8])[0])}
+structs_children = {i: set([a['id'] for a in mcc.get_structure_tree().children([i])[0]])
+                    for i in structs_descendants.keys()}
 
 conversion = {
     'volume': -3,
@@ -84,19 +85,22 @@ def process_experiment(t):
         maps = pickle.load(bz2.open(os.path.join(f'{data_dir}/{experiment}', f'maps.pickle.bz2'), 'rb'))
         globs = calculate_global_parameters(maps['globs'])
 
-        structs = {
-            382: [382, 391, 399, 407, 415],
-            423: [423, 431, 438, 446, 454],
-            463: [463, 471, 479, 486, 495, 504],
-            726: [726, 10703, 10704, 632, 10702, 734, 742, 751, 758,
-                  766, 775, 782, 790, 799, 807, 815, 823],
-            **{p: [p] for p in globs.keys()}
-        }
+        relevant_structs = set(globs.keys())
+        relevant_aggregates = {k: relevant_structs.intersection(v)
+                               for k, v in structs_descendants.items() if relevant_structs.intersection(v)}
 
-        result = {struct: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs)
-                  for struct, struct_set in structs.items()}
-        result = {acronyms[k]: v for k, v in result.items()}
-        result['total'] = calculate_stats(cells, globs)
+        # structs = {
+        #     **{p: [p] for p in relevant_structs},
+        #     **relevant_aggregates
+        # }
+        #
+        reverse_structs = defaultdict(list)
+        for k, v in relevant_aggregates.items():
+            reverse_structs[tuple(sorted(v))].append(k)
+        aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs)
+                          for struct_set in reverse_structs.keys()}
+        result = {acronyms[k]: data for s, data in aggregate_data.items() for k in reverse_structs[s]}
+
         return experiment, result
     except Exception as e:
         print(f"Exception in experiment {experiment}")
@@ -110,6 +114,7 @@ def retrieve_celldata(experiment, data_dir):
 
 def perform_aggregation(data_dir):
     experiments = [i for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
+    # experiments = ['100140949']
     experiments = [(i, data_dir) for i in experiments]
     stats_path = f'{data_dir}/../stats.pickle'
     results = create_stats(experiments)
@@ -125,4 +130,4 @@ if __name__ == '__main__':
         print(f"Usage: {sys.argv[0]} <data_dir>")
         sys.exit(-1)
     perform_aggregation(sys.argv[1])
-    # process_experiment((100140949, sys.argv[1]))
+    # process_experiment((113096571, 'output/full_brain/predicted/'))
