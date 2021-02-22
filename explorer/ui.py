@@ -1,11 +1,50 @@
 import os
 
+import ipytree
 import ipywidgets as widgets
 import numpy as np
 from IPython.display import display, Markdown
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
 from explorer.explorer_utils import retrieve_nested_path, DataFramesHolder
+
+
+class StructureTreeNode(ipytree.Node):
+    show_icon = False
+
+    def __init__(self, name, struct_id, children):
+        super().__init__(name=name, nodes=children)
+        self.struct_id = struct_id
+        self.opened = False
+
+
+class StructureTree(ipytree.Tree):
+    def __init__(self, ids):
+        self.ids = ids
+        self.mcc = MouseConnectivityCache(manifest_file=f'../mouse_connectivity/mouse_connectivity_manifest.json',
+                                          resolution=25)
+        self.structure_tree = self.mcc.get_structure_tree()
+        node = self.fill_node('grey')
+        while len(node.nodes) < 2:
+            node = node.nodes[0]
+        super().__init__(nodes=[node], multiple_selection=False)
+
+    def fill_node(self, start_node):
+        start_struct = self.structure_tree.get_structures_by_acronym([start_node])[0]
+        children = [self.fill_node(c['acronym']) for c in self.structure_tree.children(
+            [self.structure_tree.get_id_acronym_map()[start_node]])[0]]
+        children = [c for c in children if c is not None]
+
+        if not children and start_struct['acronym'] not in self.ids:
+            return None
+
+        node = StructureTreeNode(start_struct['acronym'],
+                                 start_struct['acronym'],
+                                 children)
+        if start_struct['acronym'] not in self.ids:
+            node.disabled = True
+
+        return node
 
 
 class ExperimentsSelector(widgets.VBox):
@@ -111,12 +150,17 @@ class ResultsSelector(widgets.HBox):
         self.selectors = [widgets.Dropdown(values=['Loading...']) for i in range(6)]
         for i, s in enumerate(self.selectors):
             s.observe(lambda c, i=i: self.on_change(i, c))
-        self.template = list(data.values())[0]
+        self.tree = StructureTree(list(data.values())[0].keys())
+        self.template = list(list(data.values())[0].values())[0]
+        self.tree.layout.width = "100%"
+        self.tree.layout.max_height = "80px"
+        self.tree.layout.overflow_y = 'scroll'
+        self.tree.observe(self.on_tree_change, "selected_nodes")
         for s in self.selectors[1:]:
             self.enable_selector(s, False)
         self.selectors[0].options = sorted(list(self.template.keys()))
         self.selectors[0].value = self.selectors[0].options[0]
-        super().__init__(self.selectors)
+        super().__init__([self.tree, widgets.HBox(self.selectors)])
 
     @staticmethod
     def enable_selector(selector, mode):
@@ -126,6 +170,9 @@ class ResultsSelector(widgets.HBox):
             selector.value = None
             selector.options = []
             selector.layout.visibility = 'hidden'
+
+    def on_tree_change(self, c):
+        pass
 
     def on_change(self, num, change):
         if change['name'] == 'value' and self.selectors[num].options and self.selectors[num].value is not None:
@@ -150,14 +197,26 @@ class ResultsSelector(widgets.HBox):
                 self.selectors[num + 1].disabled = len(self.selectors[num + 1].options) < 2
 
     def get_selection(self, relevant_experiments):
-        return np.array([retrieve_nested_path(self.data[str(e)],
-                                              self.get_selection_path()) for e in relevant_experiments])
+        path = self.get_selection_path()
+
+        if path is None:
+            return None
+
+        return np.array([retrieve_nested_path(self.data[str(e)], path) for e in relevant_experiments])
 
     def get_selection_label(self):
-        return '.'.join(self.get_selection_path())
+        path = self.get_selection_path()
+
+        if path is None:
+            return None
+
+        return '.'.join(str(p) for p in path)
 
     def get_selection_path(self):
-        return [s.value for s in self.selectors if s.value is not None]
+        if len(self.tree.selected_nodes) != 1:
+            return None
+
+        return [self.tree.selected_nodes[0].struct_id] + [s.value for s in self.selectors if s.value is not None]
 
 
 class RawDataResultsSelector(widgets.VBox):

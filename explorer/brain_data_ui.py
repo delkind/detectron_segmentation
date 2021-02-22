@@ -5,9 +5,9 @@ import os
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scipy.stats as stats
 from IPython.display import display, Markdown, HTML
-import pandas as pd
 
 from explorer.explorer_utils import hist, retrieve_nested_path
 from explorer.ui import ExperimentsSelector, ResultsSelector
@@ -74,13 +74,19 @@ class DataSelector(widgets.VBox):
         else:
             path = self.results_selector.get_selection_label()
             data = self.results_selector.get_selection(relevant_experiments)
+
+            if data is None:
+                self.output_message(f'Nothing to add')
+                return
+
             label = f"{self.experiment_selector.get_selection_label()}.{path} ({len(relevant_experiments)})"
+
             if label not in self.data:
                 self.added.options += (label,)
                 self.data[label] = data
                 self.output_message(f'Added data for {len(relevant_experiments)} brains')
             else:
-                self.output_message(f'Already added, ignored')
+                self.output_message(f'Already added')
 
 
 class BrainAggregatesHistogramPlot(widgets.VBox):
