@@ -6,6 +6,7 @@ import numpy as np
 from IPython.display import display, Markdown
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
+from aggregate_cell_data import get_struct_aggregates, acronyms
 from explorer.explorer_utils import retrieve_nested_path, DataFramesHolder
 
 
@@ -19,7 +20,7 @@ class StructureTreeNode(ipytree.Node):
 
 
 class StructureTree(ipytree.Tree):
-    def __init__(self, ids):
+    def __init__(self, ids, multiple_selection):
         self.ids = ids
         self.mcc = MouseConnectivityCache(manifest_file=f'../mouse_connectivity/mouse_connectivity_manifest.json',
                                           resolution=25)
@@ -27,7 +28,7 @@ class StructureTree(ipytree.Tree):
         node = self.fill_node('grey')
         while len(node.nodes) < 2:
             node = node.nodes[0]
-        super().__init__(nodes=[node], multiple_selection=False)
+        super().__init__(nodes=[node], multiple_selection=multiple_selection)
 
     def fill_node(self, start_node):
         start_struct = self.structure_tree.get_structures_by_acronym([start_node])[0]
@@ -114,8 +115,8 @@ class ExperimentsSelector(widgets.VBox):
                 oldval = self.filter['id'].value
                 self.filter['id'].options = self.get_column_options(
                     self.experiments[self.experiments.gender.isin(self.get_filter_value('gender')) &
-                    self.experiments.strain.isin(self.get_filter_value('strain')) &
-                    self.experiments.transgenic_line.isin(selection)].id)
+                                     self.experiments.strain.isin(self.get_filter_value('strain')) &
+                                     self.experiments.transgenic_line.isin(selection)].id)
                 oldval = [v for v in oldval if v in self.filter['id'].options]
                 self.filter['id'].value = oldval
 
@@ -150,12 +151,11 @@ class ResultsSelector(widgets.HBox):
         self.selectors = [widgets.Dropdown(values=['Loading...']) for i in range(6)]
         for i, s in enumerate(self.selectors):
             s.observe(lambda c, i=i: self.on_change(i, c))
-        self.tree = StructureTree(list(data.values())[0].keys())
+        self.tree = StructureTree(list(data.values())[0].keys(), multiple_selection=False)
         self.template = list(list(data.values())[0].values())[0]
         self.tree.layout.width = "100%"
-        self.tree.layout.max_height = "80px"
+        self.tree.layout.max_height = "240px"
         self.tree.layout.overflow_y = 'scroll'
-        self.tree.observe(self.on_tree_change, "selected_nodes")
         for s in self.selectors[1:]:
             self.enable_selector(s, False)
         self.selectors[0].options = sorted(list(self.template.keys()))
@@ -171,8 +171,8 @@ class ResultsSelector(widgets.HBox):
             selector.options = []
             selector.layout.visibility = 'hidden'
 
-    def on_tree_change(self, c):
-        pass
+    def get_available_brains(self):
+        return list(self.data.keys())
 
     def on_change(self, num, change):
         if change['name'] == 'value' and self.selectors[num].options and self.selectors[num].value is not None:
@@ -222,29 +222,24 @@ class ResultsSelector(widgets.HBox):
 class RawDataResultsSelector(widgets.VBox):
     def __init__(self, data_dir):
         self.data_frames = DataFramesHolder(data_dir)
-        self.data_template = self.data_frames[[e for e in os.listdir(data_dir) if e.isdigit()][0]]
+        self.available_brains = [e for e in os.listdir(data_dir) if e.isdigit()]
+        self.data_template = self.data_frames[self.available_brains[0]]
         self.messages = widgets.Output()
         self.mcc = MouseConnectivityCache(manifest_file=f'mouse_connectivity/mouse_connectivity_manifest.json',
                                           resolution=25)
         self.structure_tree = self.mcc.get_structure_tree()
+        self.aggregates = get_struct_aggregates(set(self.get_column_options(self.data_template['structure_id'])))
 
-        self.filter = {
-            'structure': widgets.SelectMultiple(description="Region",
-                                                options=[s['acronym']
-                                                         for s in self.structure_tree.get_structures_by_id(
-                                                        self.get_column_options(self.data_template['structure_id']))]),
-            'dense': widgets.SelectMultiple(description="Dense", options=self.
-                                            get_column_options(self.data_template.dense)),
-            'parameter': widgets.Dropdown(description="Parameter",
-                                          options=['coverage', 'area', 'perimeter']),
-        }
+        self.structure_selector = StructureTree(ids=[s['acronym'] for s in self.structure_tree.get_structures_by_id(
+            list(self.aggregates.keys()))],
+                                                multiple_selection=True)
+        self.parameter_selector = widgets.Dropdown(description="Parameter", options=['coverage', 'area', 'perimeter'])
 
-        for c, f in self.filter.items():
-            f.observe(lambda change, col=c: self.selection_changed(change, col))
         self.change_handler = None
-        self.selection_changed({'name': 'value'}, 'structure')
+        super().__init__((widgets.HBox([self.structure_selector, self.parameter_selector]), self.messages))
 
-        super().__init__((widgets.HBox(list(self.filter.values())), self.messages))
+    def get_available_brains(self):
+        return self.available_brains
 
     def reset(self):
         for v in self.filter.values():
@@ -254,38 +249,26 @@ class RawDataResultsSelector(widgets.VBox):
     def get_column_options(df):
         return sorted(df.unique().tolist())
 
-    def get_filter_value(self, col):
-        selection = self.filter[col].value
-        if selection is None or not selection:
-            selection = self.filter[col].options
-        return selection
+    def get_selected_structs(self):
+        selected_acronyms = [n.struct_id for n in self.structure_selector.selected_nodes]
+        id_sets = [self.aggregates[self.structure_tree.get_id_acronym_map()[s]] for s in selected_acronyms]
+        ids = set.union(*id_sets)
+        return [acronyms[i] for i in ids]
 
-    def selection_changed(self, change, col):
-        if change['name'] == 'value':
-            selection = self.get_filter_value(col)
-
-            if col == 'structure':
-                self.filter['dense'].options = self.get_column_options(self.data_template[self.data_template.structure_id.isin(
-                        [self.structure_tree.get_id_acronym_map()[s] for s in selection])].dense)
-
-            if self.change_handler is not None:
-                self.change_handler(change, col)
-
-    def process_data_frame(self, df):
-        structs = [self.structure_tree.get_id_acronym_map()[s] for s in self.get_filter_value('structure')]
-        frame = df[df.structure_id.isin(structs) & df.dense.isin(self.get_filter_value('dense'))]
-        d = frame[self.filter['parameter'].value].to_numpy()
+    def process_data_frame(self, df, structs):
+        frame = df[df.structure_id.isin(structs)]
+        d = frame[self.parameter_selector.value].to_numpy()
         return d
 
     def get_selection(self, relevant_experiments):
-        return np.concatenate([self.process_data_frame(self.data_frames[e]) for e in relevant_experiments])
+        structs = [self.structure_tree.get_id_acronym_map()[s] for s in self.get_selected_structs()]
+        return np.concatenate([self.process_data_frame(self.data_frames[e], structs) for e in relevant_experiments])
 
     def get_selection_label(self):
-        label = '.'.join([f'({",".join([str(v) for v in self.filter[val].value])})'
-                          for val in ['structure', 'dense'] if
-                          self.filter[val].value]) + f'.{self.filter["parameter"].value}'
+        label = '.'.join([n.struct_id for n in self.structure_selector.selected_nodes])
         if label == '':
             label = '<any>'
+        label = f'{label}.{self.parameter_selector.value}'
 
         return label
 

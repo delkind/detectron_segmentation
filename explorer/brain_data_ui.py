@@ -15,7 +15,8 @@ from explorer.ui import ExperimentsSelector, ResultsSelector
 
 class DataSelector(widgets.VBox):
     def __init__(self, data_dir, results_selector):
-        self.experiment_selector = ExperimentsSelector([e for e in os.listdir(data_dir) if e.isdigit()])
+        # self.experiment_selector = ExperimentsSelector([e for e in os.listdir(data_dir) if e.isdigit()])
+        self.experiment_selector = ExperimentsSelector(results_selector.get_available_brains())
         self.results_selector = results_selector
         self.add_button = widgets.Button(description='Add')
         self.add_button.on_click(lambda b: self.add_data())

@@ -1,5 +1,4 @@
 import bz2
-import itertools
 import os
 import pickle
 import sys
@@ -78,6 +77,12 @@ def calculate_global_parameters(globs_per_section):
     return result
 
 
+def get_struct_aggregates(relevant_structs):
+    relevant_aggregates = {k: relevant_structs.intersection(v)
+                           for k, v in structs_descendants.items() if relevant_structs.intersection(v)}
+    return relevant_aggregates
+
+
 def process_experiment(t):
     experiment, data_dir = t
     try:
@@ -86,14 +91,8 @@ def process_experiment(t):
         globs = calculate_global_parameters(maps['globs'])
 
         relevant_structs = set(globs.keys())
-        relevant_aggregates = {k: relevant_structs.intersection(v)
-                               for k, v in structs_descendants.items() if relevant_structs.intersection(v)}
+        relevant_aggregates = get_struct_aggregates(relevant_structs)
 
-        # structs = {
-        #     **{p: [p] for p in relevant_structs},
-        #     **relevant_aggregates
-        # }
-        #
         reverse_structs = defaultdict(list)
         for k, v in relevant_aggregates.items():
             reverse_structs[tuple(sorted(v))].append(k)
@@ -130,4 +129,3 @@ if __name__ == '__main__':
         print(f"Usage: {sys.argv[0]} <data_dir>")
         sys.exit(-1)
     perform_aggregation(sys.argv[1])
-    # process_experiment((113096571, 'output/full_brain/predicted/'))
