@@ -1,4 +1,5 @@
 import ast
+import http.client
 import os
 import pickle
 import shutil
@@ -36,7 +37,7 @@ class ExperimentImagesDownloader(DirWatcher):
     def on_process_error(self, item, exception):
         retval = super().on_process_error(item, exception)
         self.logger.error(f"Error occurred during processing", exc_info=True)
-        if type(exception) in [urllib.error.HTTPError, OSError, ValueError]:
+        if type(exception) in [urllib.error.HTTPError, OSError, ValueError, http.client.RemoteDisconnected]:
             return False
         else:
             return retval
