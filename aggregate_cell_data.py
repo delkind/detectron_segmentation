@@ -43,6 +43,9 @@ def calculate_stats(cells, globs):
         **{field: {
             'mean': cells[field].mean() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
             'median': cells[field].median() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0
+            'percentile10': cells[field].quantile(0.1) * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0
+            'percentile90': cells[field].quantile(0.9) * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0
+            'percentile95': cells[field].quantile(0.95) * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0
         } for field in ['coverage', 'area', 'perimeter']},
     }
 
