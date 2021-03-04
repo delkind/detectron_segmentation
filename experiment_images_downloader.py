@@ -51,6 +51,7 @@ class ExperimentImagesDownloader(DirWatcher):
             try:
                 time.sleep(2 ** retries * 0.1)
                 images = self.image_api.section_image_query(experiment_id)
+                break
             except simplejson.errors.JSONDecodeError as e:
                 if retries > 10:
                     raise e
