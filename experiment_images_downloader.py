@@ -83,7 +83,7 @@ class ExperimentImagesDownloader(DirWatcher):
         return rects
 
     def download_fullres(self, experiment_id, section, bbox, image_desc, directory):
-        url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
+        url = f'https://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
               f'mime=1&zoom={8}&&filter=range&filterVals=0,534,0,1006,0,4095'
         x, y, w, h = bbox.scale(64)
         url += f'&top={y}&left={x}&width={w}&height={h}'
@@ -107,7 +107,7 @@ class ExperimentImagesDownloader(DirWatcher):
         return filename
 
     def download_snapshot(self, experiment_id, section, image_desc, directory):
-        url = f'http://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
+        url = f'https://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
               f'mime=1&zoom={2}&&filter=range&filterVals=0,534,0,1006,0,4095'
         filename = f'{directory}/thumbnail-{experiment_id}-{section}.jpg'
         filename, _, _ = self.retrieve_url(filename, url)
@@ -126,6 +126,16 @@ class ExperimentImagesDownloader(DirWatcher):
                 fname, msg = urllib.request.urlretrieve(url, filename=f'{filename}.partial')
                 os.replace(fname, filename)
                 return filename, msg, True
+            except http.client.HTTPException as e:
+                backoff += 1
+                retries -= 1
+                if retries > 0:
+                    self.logger.info(f"Transient error downloading {url}, "
+                                     f"retrying ({retries} retries left) ...", exc_info=True)
+                    continue
+                else:
+                    self.logger.exception(f"Retry count exceeded or permanent error for {url} ({filename}), exiting...")
+                    raise e
             except urllib.error.HTTPError as e:
                 backoff += 1
                 if 500 <= e.code < 600 and retries > 0:
