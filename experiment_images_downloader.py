@@ -56,6 +56,7 @@ class ExperimentImagesDownloader(DirWatcher):
                     raise e
                 else:
                     self.logger.info(f"Exception invoking image API, retrying")
+                    retries += 1
                     continue
 
         images = {i['section_number']: i for i in images}
