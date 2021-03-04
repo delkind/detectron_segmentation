@@ -49,12 +49,13 @@ class ExperimentImagesDownloader(DirWatcher):
         images = []
         while True:
             try:
-                time.sleep(2 ** retries)
+                time.sleep(2 ** retries * 0.1)
                 images = self.image_api.section_image_query(experiment_id)
             except simplejson.errors.JSONDecodeError as e:
                 if retries > 10:
                     raise e
                 else:
+                    self.logger.info(f"Exception invoking image API, retrying")
                     continue
 
         images = {i['section_number']: i for i in images}
