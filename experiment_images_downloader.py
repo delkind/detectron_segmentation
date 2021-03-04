@@ -10,6 +10,7 @@ import urllib.request
 import PIL.Image
 import cv2
 import numpy as np
+import simplejson
 from PIL import Image
 from allensdk.api.queries.image_download_api import ImageDownloadApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
@@ -44,7 +45,18 @@ class ExperimentImagesDownloader(DirWatcher):
 
     def process_item(self, item, directory):
         experiment_id = int(item)
-        images = self.image_api.section_image_query(experiment_id)
+        retries = 0
+        images = []
+        while True:
+            try:
+                time.sleep(2 ** retries)
+                images = self.image_api.section_image_query(experiment_id)
+            except simplejson.errors.JSONDecodeError as e:
+                if retries > 10:
+                    raise e
+                else:
+                    continue
+
         images = {i['section_number']: i for i in images}
         segmentation = np.load(f'{self.segmentation_dir}/{item}/{item}-sections.npz')['arr_0']
         mask = np.isin(segmentation, list(self.structure_ids))
