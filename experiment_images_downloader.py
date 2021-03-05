@@ -38,7 +38,7 @@ class ExperimentImagesDownloader(DirWatcher):
     def on_process_error(self, item, exception):
         retval = super().on_process_error(item, exception)
         self.logger.error(f"Error occurred during processing", exc_info=True)
-        if type(exception) in [urllib.error.HTTPError, OSError, ValueError, http.client.RemoteDisconnected]:
+        if any(map(lambda x: issubclass(exception, x), [urllib.error.HTTPError, OSError, ValueError, http.client.error])):
             return False
         else:
             return retval
