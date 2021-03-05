@@ -49,7 +49,7 @@ class ExperimentImagesDownloader(DirWatcher):
         images = []
         while True:
             try:
-                time.sleep(2 ** retries * 0.1)
+                time.sleep(2 ** (retries // 2))
                 images = self.image_api.section_image_query(experiment_id)
                 break
             except simplejson.errors.JSONDecodeError as e:
@@ -141,24 +141,13 @@ class ExperimentImagesDownloader(DirWatcher):
                 fname, msg = urllib.request.urlretrieve(url, filename=f'{filename}.partial')
                 os.replace(fname, filename)
                 return filename, msg, True
-            except http.client.HTTPException as e:
+            except http.client.HTTPException or ConnectionError or urllib.error.HTTPError as e:
                 backoff += 1
                 retries -= 1
                 if retries > 0:
                     self.logger.info(f"Transient error downloading {url}, "
                                      f"retrying ({retries} retries left) ...", exc_info=True)
                     continue
-                else:
-                    self.logger.exception(f"Retry count exceeded or permanent error for {url} ({filename}), exiting...")
-                    raise e
-            except urllib.error.HTTPError as e:
-                backoff += 1
-                if 500 <= e.code < 600 and retries > 0:
-                    retries -= 1
-                    if retries > 0:
-                        self.logger.info(f"Transient error downloading {url}, "
-                                         f"retrying ({retries} retries left) ...", exc_info=True)
-                        continue
                 else:
                     self.logger.exception(f"Retry count exceeded or permanent error for {url} ({filename}), exiting...")
                     raise e
