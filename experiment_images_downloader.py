@@ -141,7 +141,7 @@ class ExperimentImagesDownloader(DirWatcher):
                 fname, msg = urllib.request.urlretrieve(url, filename=f'{filename}.partial')
                 os.replace(fname, filename)
                 return filename, msg, True
-            except http.client.HTTPException or ConnectionError or urllib.error.HTTPError as e:
+            except http.client.HTTPException or OSError or urllib.error.HTTPError as e:
                 backoff += 1
                 retries -= 1
                 if retries > 0:
