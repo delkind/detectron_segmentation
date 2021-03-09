@@ -1,8 +1,8 @@
 import ast
+import itertools
 import math
 import os
 import pickle
-import sys
 
 import cv2
 import matplotlib
@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
+from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from matplotlib.collections import PatchCollection
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Circle
@@ -18,6 +19,9 @@ from shapely.geometry import Polygon
 
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
+from localize_brain import detect_brain
+
+mcc = MouseConnectivityCache(manifest_file='mouse_connectivity/mouse_connectivity_manifest.json', resolution=25)
 
 unique_colors = [
     (255, 0, 0)[::-1],
@@ -47,34 +51,34 @@ unique_colors = [
 ]
 
 
-def create_section_image(section, experiment_id, directory, celldata, bboxes):
+def get_brain_bbox_and_image(bboxes, directory, experiment_id, section, image_needed):
+    thumb = cv2.imread(f"{directory}/thumbnail-{experiment_id}-{section}.jpg", cv2.IMREAD_GRAYSCALE)
+    _, brain_bbox, _ = detect_brain((thumb != 0).astype(np.uint8) * 255)
+    if image_needed:
+        thumb = cv2.resize(thumb, (0, 0), fx=16, fy=16)
+        for bbox in bboxes[section]:
+            x, y, w, h = bbox.scale(64)
+            image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
+                               cv2.IMREAD_GRAYSCALE)
+            x, y, w, h = bbox.scale(16)
+            thumb[y: y + h, x: x + w] = cv2.resize(image, (0, 0), fx=0.25, fy=0.25)
+    return thumb, brain_bbox.scale(64)
+
+
+def get_contours(bboxes, celldata, directory, experiment_id, section):
     section_celldata = celldata[celldata.section == section]
     structure_numbers = section_celldata.structure_id.to_numpy()
-    structure_modifiers = -(section_celldata.dense.to_numpy().astype(int))
-    structure_modifiers[structure_modifiers == 0] = 1
-    structure_numbers *= structure_modifiers
     coords = (np.stack((section_celldata.centroid_x.to_numpy() // 64,
                         section_celldata.centroid_y.to_numpy() // 64,
                         structure_numbers)).swapaxes(0, 1)).astype(int)
     coords = list(zip(*list(zip(*coords.tolist()))))
     coords = {(x, y): v for x, y, v in coords}
     unique_numbers = np.unique(structure_numbers).tolist()
-    colors = {v: unique_colors[i % len(unique_colors)] for i, v in enumerate(unique_numbers)}
-
-    thumb = cv2.imread(f"{directory}/thumbnail-{experiment_id}-{section}.jpg", cv2.IMREAD_GRAYSCALE)
-    thumb = cv2.resize(thumb, (0, 0), fx=16, fy=16)
+    colors = {k: v for k, v in zip(unique_numbers, [r['rgb_triplet'] for r in mcc.get_structure_tree().
+                                   get_structures_by_id(unique_numbers)])}
+    cell_contours = []
     for bbox in bboxes[section]:
         x, y, w, h = bbox.scale(64)
-        image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
-                           cv2.IMREAD_GRAYSCALE)
-        image = cv2.resize(image, (0, 0), fx=0.25, fy=0.25)
-        x, y, w, h = bbox.scale(16)
-        thumb[y: y + h, x: x + w] = image
-    thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
-
-    for bbox in bboxes[section]:
-        x, y, w, h = bbox.scale(64)
-        image = thumb[y // 4: y // 4 + h, x // 4: x // 4 + w, :]
         mask = cv2.imread(f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png',
                           cv2.IMREAD_GRAYSCALE)
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -84,11 +88,46 @@ def create_section_image(section, experiment_id, directory, celldata, bboxes):
         cnts = [cnt for cnt in cnts if cnt.shape[0] > 2]
         polygons = [Polygon((cnt.squeeze() + np.array([x, y])) // 64).centroid for cnt in cnts]
         polygons = [(int(p.x), int(p.y)) for p in polygons]
-        cnts = {v: [cnt.squeeze() // 4 for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == v]
-                for v in unique_numbers}
-        for p in unique_numbers:
-            cv2.polylines(image, cnts[p], color=colors[p], thickness=1, isClosed=True)
-    return thumb
+        cell_contours += [
+            {k: [cnt.squeeze() + np.array([x, y]) for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == k]
+             for k in unique_numbers}]
+    cell_contours = [(colors[k], list(itertools.chain.from_iterable([c.get(k, []) for c in cell_contours])))
+                     for k in unique_numbers]
+    return cell_contours
+
+
+def create_section_image(section, experiment_id, directory, celldata, bboxes):
+    thumb, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, True)
+    cell_contours = get_contours(bboxes, celldata, directory, experiment_id, section)
+
+    thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
+
+    for color, contours in cell_contours:
+        cv2.polylines(thumb, [c // 4 for c in contours], color=tuple(color)[::-1], thickness=1, isClosed=True)
+
+    x, y, w, h = brain_bbox.scale(0.25)
+    return thumb[y: y + h, x: x + w]
+
+
+def create_section_contours(section, experiment_id, directory, celldata, bboxes, path):
+    _, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, False)
+    cell_contours = get_contours(bboxes, celldata, directory, experiment_id, section)
+
+    x, y, w, h = brain_bbox
+
+    # fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(brain_bbox.w // 100, brain_bbox.h // 100), dpi=25)
+    ax.set_xlim(0, brain_bbox.w)
+    ax.set_ylim(brain_bbox.h, 0)
+    ax.axis('off')
+    ax.add_patch(plt.Rectangle((0, 0), w, h, color=(0, 0, 0), fill=False))
+
+    for color, contours in cell_contours:
+        for poly in contours:
+            ax.add_patch(plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
+                                     closed=True, fill=False, color=np.array(color) / 255))
+
+    plt.savefig(path, dpi=25)
 
 
 class ExperimentDataAnnotator(object):
