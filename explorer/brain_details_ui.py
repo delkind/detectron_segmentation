@@ -8,6 +8,7 @@ import numpy as np
 from IPython.display import display, Markdown, Javascript, HTML
 import pandas as pd
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+import matplotlib.pyplot as plt
 
 from annotate_cell_data import create_section_image, get_brain_bbox_and_image, create_section_contours
 from explorer.explorer_utils import is_file_up_to_date, plot_section_violin_diagram, plot_section_histograms
@@ -140,8 +141,11 @@ class SectionHistogramPlotter(object):
             display(widgets.HBox((self.HeatmapAndPatchButtons(experiment_id, base_time, input_dir).panel,)))
             thumb = None
 
-    #     with self.output:
-    #         plot_section_violin_diagram(self.data, structure_tree, thumb)
+        with self.output:
+            # plot_section_violin_diagram(self.data, structure_tree, thumb)
+            plt.imshow(thumb)
+            plt.axis('off')
+            plt.show()
     #
     # def clicked(self, b):
     #     self.hist_button.disabled = True
