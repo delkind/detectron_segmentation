@@ -5,7 +5,7 @@ import PIL.Image as Image
 import cv2
 import ipywidgets as widgets
 import numpy as np
-from IPython.display import display, Markdown, Javascript
+from IPython.display import display, Markdown, Javascript, HTML
 import pandas as pd
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 
@@ -61,17 +61,17 @@ class SectionHistogramPlotter(object):
             self.directory = f'{input_dir}/{self.experiment_id}'
             self.bboxes = pickle.load(open(f'{self.directory}/bboxes.pickle', 'rb'))
             self.raw_image_url = f'{input_dir}/{self.experiment_id}/raw-image-{self.experiment_id}-{section}.jpg'
-            self.raw_image = self.create_button(self.raw_image_url, "raw images", self.build_raw_image)
-            self.contours_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.pdf'
-            self.contours = self.create_button(self.contours_url, "cell contours", self.build_contours)
-            self.annotated_url = f'{input_dir}/{self.experiment_id}/annotated-{self.experiment_id}-{section}.pdf'
-            self.annotated = self.create_button(self.contours_url, "cell contours", self.build_annotated)
-            self.panel = widgets.HBox((self.contours, self.raw_image))
+            self.raw_image = self.create_button(self.raw_image_url, "raw image", self.build_raw_image, True)
+            self.contours_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.png'
+            self.contours = self.create_button(self.contours_url, "cell contours", self.build_contours, True)
+            self.annotated_url = f'{input_dir}/{self.experiment_id}/annotated-{self.experiment_id}-{section}.jpg'
+            self.annotated = self.create_button(self.annotated_url, "annotated image", self.build_annotated, False)
+            self.panel = widgets.HBox((self.annotated, self.contours, self.raw_image))
 
         def build_raw_image(self):
             thumb, brain_bbox = get_brain_bbox_and_image(self.bboxes, self.directory, self.experiment_id,
-                                                         self.section, True)
-            x, y, w, h = brain_bbox.scale(0.25)
+                                                         self.section, True, scale=2)
+            x, y, w, h = brain_bbox.scale(0.5)
             cv2.imwrite(self.raw_image_url, thumb[y: y + h, x: x + w])
 
         def build_contours(self):
@@ -84,19 +84,26 @@ class SectionHistogramPlotter(object):
             _, r, _ = detect_brain(cv2.cvtColor(thumb, cv2.COLOR_BGR2GRAY))
             cv2.imwrite(self.annotated_url, thumb[r.y: r.y + r.h, r.x: r.x + r.w])
 
-        def create_button(self, url, display_name, builder):
+        def create_button(self, url, display_name, builder, download):
             def on_click(b):
                 if not is_file_up_to_date(url, self.base_time):
                     b.disabled = True
                     b.description = f"Building {display_name}..."
                     builder()
-                    b.description = f"Open {display_name}"
+                    b.description = f"{'Open' if not download else 'Download'} {display_name}"
                     b.disabled = False
 
-                display(Javascript(f"window.open('{url}');"))
+                if download:
+                    display(HTML(f'<a href="{url}" download id="download" hidden></a>'))
+                    display(Javascript('''
+                        document.getElementById('download').click();
+                        document.getElementById('download').remove();
+                    '''))
+                else:
+                    display(Javascript(f"window.open('{url}');"))
 
             if os.path.isfile(url):
-                button = widgets.Button(description=f"Open {display_name}")
+                button = widgets.Button(description=f"{'Open' if not download else 'Download'} {display_name}")
             else:
                 button = widgets.Button(description=f"Build {display_name}")
 
@@ -108,9 +115,9 @@ class SectionHistogramPlotter(object):
         self.structure_tree = structure_tree
         self.experiment_id = experiment_id
         self.data = data
-        self.hist_button = widgets.Button(description=f"Show detailed histograms")
-        self.hist_button.layout.width = 'auto'
-        self.hist_button.on_click(self.clicked)
+        # self.hist_button = widgets.Button(description=f"Show detailed histograms")
+        # self.hist_button.layout.width = 'auto'
+        # self.hist_button.on_click(self.clicked)
         self.output = widgets.Output()
         self.section = section
         display(Markdown('---'))
@@ -120,7 +127,7 @@ class SectionHistogramPlotter(object):
             self.annotated_button_bar = self.AnnotationsButtonBar(self.experiment_id, self.data, self.section,
                                                                   base_time, input_dir)
             display(self.output)
-            display(widgets.HBox((self.hist_button, self.annotated_button_bar.panel)))
+            display(widgets.HBox((self.annotated_button_bar.panel,)))
             if os.path.isfile(f'{input_dir}/{experiment_id}/thumbnail-{self.experiment_id}-{section}.jpg'):
                 thumb = Image.open(f'{input_dir}/{experiment_id}/thumbnail-{self.experiment_id}-{section}.jpg')
                 _, rect, _ = detect_brain(np.array(thumb.convert('LA'))[:, :, 0])
@@ -130,20 +137,19 @@ class SectionHistogramPlotter(object):
         else:
             display(widgets.Label(f"Experiment {self.experiment_id}, totals"))
             display(self.output)
-            display(widgets.HBox(
-                (self.hist_button, self.HeatmapAndPatchButtons(experiment_id, base_time, input_dir).panel)))
+            display(widgets.HBox((self.HeatmapAndPatchButtons(experiment_id, base_time, input_dir).panel,)))
             thumb = None
 
-        with self.output:
-            plot_section_violin_diagram(self.data, structure_tree, thumb)
-
-    def clicked(self, b):
-        self.hist_button.disabled = True
-        self.hist_button.description = 'Building detailed histograms...'
-        # self.output.clear_output()
-        with self.output:
-            plot_section_histograms(self.data, self.structure_tree)
-        self.hist_button.layout.display = 'none'
+    #     with self.output:
+    #         plot_section_violin_diagram(self.data, structure_tree, thumb)
+    #
+    # def clicked(self, b):
+    #     self.hist_button.disabled = True
+    #     self.hist_button.description = 'Building detailed histograms...'
+    #     # self.output.clear_output()
+    #     with self.output:
+    #         plot_section_histograms(self.data, self.structure_tree)
+    #     self.hist_button.layout.display = 'none'
 
 
 class BrainDetailsSelector(widgets.VBox):

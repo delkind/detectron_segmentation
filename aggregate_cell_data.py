@@ -11,11 +11,15 @@ from tqdm import tqdm
 
 mcc = MouseConnectivityCache(manifest_file='mouse_connectivity/mouse_connectivity_manifest.json', resolution=25)
 
-acronyms = {v: k for k, v in mcc.get_structure_tree().get_id_acronym_map().items()}
-structs_descendants = {i: set(mcc.get_structure_tree().descendant_ids([i])[0])
-                       for i in set(mcc.get_structure_tree().descendant_ids([8])[0])}
-structs_children = {i: set([a['id'] for a in mcc.get_structure_tree().children([i])[0]])
-                    for i in structs_descendants.keys()}
+if os.path.isfile('mouse_connectivity/tree.pickle'):
+    acronyms, structs_descendants, structs_children = pickle.load(open('mouse_connectivity/tree.pickle', 'rb'))
+else:
+    acronyms = {v: k for k, v in mcc.get_structure_tree().get_id_acronym_map().items()}
+    structs_descendants = {i: set(mcc.get_structure_tree().descendant_ids([i])[0])
+                           for i in set(mcc.get_structure_tree().descendant_ids([8])[0])}
+    structs_children = {i: set([a['id'] for a in mcc.get_structure_tree().children([i])[0]])
+                        for i in structs_descendants.keys()}
+    pickle.dump((acronyms, structs_descendants, structs_children), open('mouse_connectivity/tree.pickle', 'wb'))
 
 conversion = {
     'volume': -3,

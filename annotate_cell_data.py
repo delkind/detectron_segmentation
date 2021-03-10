@@ -51,18 +51,18 @@ unique_colors = [
 ]
 
 
-def get_brain_bbox_and_image(bboxes, directory, experiment_id, section, image_needed):
+def get_brain_bbox_and_image(bboxes, directory, experiment_id, section, image_needed, scale=4):
     thumb = cv2.imread(f"{directory}/thumbnail-{experiment_id}-{section}.jpg", cv2.IMREAD_GRAYSCALE)
-    _, brain_bbox, _ = detect_brain((thumb != 0).astype(np.uint8) * 255)
+    _, brain_bbox, _ = detect_brain(thumb)
+    thumb = cv2.resize(thumb, (0, 0), fx=64 // scale, fy=64 // scale)
     if image_needed:
-        thumb = cv2.resize(thumb, (0, 0), fx=16, fy=16)
         for bbox in bboxes[section]:
             x, y, w, h = bbox.scale(64)
             image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
                                cv2.IMREAD_GRAYSCALE)
-            x, y, w, h = bbox.scale(16)
-            thumb[y: y + h, x: x + w] = cv2.resize(image, (0, 0), fx=0.25, fy=0.25)
-    return thumb, brain_bbox.scale(64)
+            x, y, w, h = bbox.scale(64 // scale)
+            thumb[y: y + h, x: x + w] = cv2.resize(image, (0, 0), fx=1.0 / scale, fy=1.0 / scale)
+    return thumb, brain_bbox.pad(5, 5).scale(64)
 
 
 def get_contours(bboxes, celldata, directory, experiment_id, section):
@@ -110,24 +110,30 @@ def create_section_image(section, experiment_id, directory, celldata, bboxes):
 
 
 def create_section_contours(section, experiment_id, directory, celldata, bboxes, path):
-    _, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, False)
+    thumb, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, False, scale=2)
     cell_contours = get_contours(bboxes, celldata, directory, experiment_id, section)
 
-    x, y, w, h = brain_bbox
+    x, y, w, h = brain_bbox.scale(0.5)
+    mask = np.zeros((h, w, 4), dtype=thumb.dtype)
+
+    cv2.rectangle(mask, (0, 0), (w, h), color=(0, 0, 0, 255), thickness=2)
 
     # fig, ax = plt.subplots()
-    fig, ax = plt.subplots(figsize=(brain_bbox.w // 100, brain_bbox.h // 100), dpi=25)
-    ax.set_xlim(0, brain_bbox.w)
-    ax.set_ylim(brain_bbox.h, 0)
-    ax.axis('off')
-    ax.add_patch(plt.Rectangle((0, 0), w, h, color=(0, 0, 0), fill=False))
+    # fig, ax = plt.subplots(figsize=(brain_bbox.w // 100, brain_bbox.h // 100), dpi=25)
+    # ax.set_xlim(0, brain_bbox.w)
+    # ax.set_ylim(brain_bbox.h, 0)
+    # ax.axis('off')
+    # ax.add_patch(plt.Rectangle((0, 0), w, h, color=(0, 0, 0), fill=False))
 
     for color, contours in cell_contours:
-        for poly in contours:
-            ax.add_patch(plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
-                                     closed=True, fill=False, color=np.array(color) / 255))
+        cv2.polylines(mask, [(c // 2) - np.array([x, y]) for c in contours], color=(tuple(color)[::-1]) + (255,),
+                      thickness=2, isClosed=True)
+        # for poly in contours:
+        #     ax.add_patch(plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
+        #                              closed=True, fill=False, color=np.array(color) / 255))
 
-    plt.savefig(path, dpi=25)
+    # plt.savefig(path, dpi=25)
+    cv2.imwrite(path, mask)
 
 
 class ExperimentDataAnnotator(object):
