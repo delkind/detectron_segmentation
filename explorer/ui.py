@@ -5,9 +5,10 @@ import ipywidgets as widgets
 import numpy as np
 from IPython.display import display, Markdown
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+import matplotlib.pyplot as plt
 
 from aggregate_cell_data import get_struct_aggregates, acronyms
-from explorer.explorer_utils import retrieve_nested_path, DataFramesHolder
+from explorer.explorer_utils import retrieve_nested_path, DataFramesHolder, init_model, predict_crop
 
 
 class StructureTreeNode(ipytree.Node):
@@ -274,3 +275,31 @@ class RawDataResultsSelector(widgets.VBox):
 
     def on_selection_change(self, handler):
         self.change_handler = handler
+
+
+class CropPredictor(widgets.VBox):
+    def __init__(self):
+        self.upload = widgets.FileUpload(multiple=True)
+        self.go_button = widgets.Button(description='Go')
+        self.go_button.on_click(self.do_predict)
+        self.output = widgets.Output()
+        self.cell_model = None
+        super().__init__((widgets.HBox((self.upload, self.go_button,)), self.output,))
+
+    def do_predict(self, b):
+        import cv2
+
+        if self.cell_model is None:
+            self.cell_model = init_model('output/new_cells/model_0324999.pth', 'cpu', 0.5)
+
+        with self.output:
+            fig, ax = plt.subplots(1, len(self.upload.value), figsize=(len(self.upload.value) * 10, 10))
+            for i, (name, file_info) in enumerate(self.upload.value.items()):
+                crop = cv2.imdecode(np.frombuffer(file_info['content'], dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+                ax[i].set_title(name)
+                ax[i].imshow(cv2.cvtColor(predict_crop(crop, self.cell_model), cv2.COLOR_BGR2RGB))
+
+            plt.show()
+
+
+

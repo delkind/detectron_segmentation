@@ -1,6 +1,8 @@
 import os
 import pickle
 
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = str(pow(2, 140))
+
 import PIL.Image as Image
 import cv2
 import ipywidgets as widgets
@@ -11,13 +13,14 @@ from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 import matplotlib.pyplot as plt
 
 from annotate_cell_data import create_section_image, get_brain_bbox_and_image, create_section_contours
-from explorer.explorer_utils import is_file_up_to_date, plot_section_violin_diagram, plot_section_histograms
+from explorer.explorer_utils import is_file_up_to_date, plot_section_violin_diagram, plot_section_histograms, \
+    init_model, predict_crop
 from explorer.ui import ExperimentsSelector
 from localize_brain import detect_brain
 
 
 class SectionHistogramPlotter(object):
-    class HeatmapAndPatchButtons(object):
+    class HeatmapAndPatchButtons(widgets.HBox):
         def __init__(self, experiment_id, base_time, input_dir):
             self.experiment_id = experiment_id
             self.base_time = base_time
@@ -25,7 +28,7 @@ class SectionHistogramPlotter(object):
             self.patches = self.create_button(patches_url, "patches", self.build_patches)
             heatmaps_url = f'{input_dir}/{self.experiment_id}/heatmaps-{self.experiment_id}.pdf'
             self.heatmaps = self.create_button(heatmaps_url, "heatmaps", self.build_heatmaps)
-            self.panel = widgets.HBox((self.heatmaps, self.patches))
+            super().__init__((self.heatmaps, self.patches, ))
 
         def build_patches(self):
             pass
@@ -53,8 +56,9 @@ class SectionHistogramPlotter(object):
             button.layout.width = 'auto'
             return button
 
-    class AnnotationsButtonBar(object):
-        def __init__(self, experiment_id, full_data, section, base_time, input_dir):
+    class AnnotationsButtonBar(widgets.HBox):
+        def __init__(self, experiment_id, full_data, section, base_time, input_dir, output):
+            self.output = output
             self.section = section
             self.full_data = full_data
             self.experiment_id = experiment_id
@@ -67,7 +71,13 @@ class SectionHistogramPlotter(object):
             self.contours = self.create_button(self.contours_url, "cell contours", self.build_contours, True)
             self.annotated_url = f'{input_dir}/{self.experiment_id}/annotated-{self.experiment_id}-{section}.jpg'
             self.annotated = self.create_button(self.annotated_url, "annotated image", self.build_annotated, False)
-            self.panel = widgets.HBox((self.annotated, self.contours, self.raw_image))
+            self.y_input = widgets.IntText(value=0, description='Y')
+            self.x_input = widgets.IntText(value=0, description='X')
+            self.predict_button = widgets.Button(description='Predict crop', )
+            self.predict_button.on_click(self.do_predict)
+            self.cell_model = None
+            super().__init__((self.annotated, self.contours, self.raw_image, self.x_input, self.y_input,
+                              self.predict_button,))
 
         def build_raw_image(self):
             thumb, brain_bbox = get_brain_bbox_and_image(self.bboxes, self.directory, self.experiment_id,
@@ -112,6 +122,29 @@ class SectionHistogramPlotter(object):
             button.layout.width = 'auto'
             return button
 
+        def do_predict(self, b):
+            if self.cell_model is None:
+                self.cell_model = init_model('output/new_cells/model_0324999.pth', 'cpu', 0.5)
+
+            url = f'{self.directory}/raw-unscaled-{self.experiment_id}-{self.section}.jpg'
+            if not os.path.isfile(url):
+                thumb, brain_bbox = get_brain_bbox_and_image(self.bboxes, self.directory, self.experiment_id,
+                                                             self.section, True, scale=1)
+                x, y, w, h = brain_bbox
+                cv2.imwrite(url, thumb)
+            else:
+                thumb = cv2.imread(url, cv2.IMREAD_GRAYSCALE)
+                x = 0
+                y = 0
+
+            x += self.x_input.value * 2
+            y += self.y_input.value * 2
+
+            thumb = thumb[y: y + 312, x: x + 312]
+
+            with self.output:
+                plt.imshow(cv2.cvtColor(predict_crop(thumb, self.cell_model), cv2.COLOR_BGR2RGB))
+
     def __init__(self, experiment_id, section, data, base_time, input_dir, structure_tree):
         self.structure_tree = structure_tree
         self.experiment_id = experiment_id
@@ -126,9 +159,9 @@ class SectionHistogramPlotter(object):
             self.section = int(section)
             display(widgets.Label(f"Experiment {self.experiment_id}, section {self.section}"))
             self.annotated_button_bar = self.AnnotationsButtonBar(self.experiment_id, self.data, self.section,
-                                                                  base_time, input_dir)
+                                                                  base_time, input_dir, self.output)
             display(self.output)
-            display(widgets.HBox((self.annotated_button_bar.panel,)))
+            display(widgets.HBox((self.annotated_button_bar,)))
             if os.path.isfile(f'{input_dir}/{experiment_id}/thumbnail-{self.experiment_id}-{section}.jpg'):
                 thumb = Image.open(f'{input_dir}/{experiment_id}/thumbnail-{self.experiment_id}-{section}.jpg')
                 _, rect, _ = detect_brain(np.array(thumb.convert('LA'))[:, :, 0])
@@ -138,7 +171,7 @@ class SectionHistogramPlotter(object):
         else:
             display(widgets.Label(f"Experiment {self.experiment_id}, totals"))
             display(self.output)
-            display(widgets.HBox((self.HeatmapAndPatchButtons(experiment_id, base_time, input_dir).panel,)))
+            display(widgets.HBox((self.HeatmapAndPatchButtons(experiment_id, base_time, input_dir),)))
             thumb = None
 
         with self.output:

@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
+from detectron2.config import get_cfg
+from detectron2.engine import DefaultPredictor
+from detectron2.model_zoo import model_zoo
+
+from experiment_images_predictor import extract_predictions
 
 
 def reject_outliers(data):
@@ -152,6 +157,25 @@ class DataFramesHolder(object):
 
 def is_file_up_to_date(path, base_time):
     return os.path.isfile(path) and os.path.getmtime(path) > base_time
+
+
+def init_model(model_path, device, threshold):
+    cfg = get_cfg()
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+    cfg.MODEL.DEVICE = device
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = threshold
+    cfg.MODEL.WEIGHTS = model_path
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1
+    return DefaultPredictor(cfg)
+
+
+def predict_crop(crop, model):
+    import cv2
+    crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
+    outputs = model(crop)
+    polygons, mask = extract_predictions(outputs["instances"].to("cpu"))
+    cv2.polylines(crop, polygons, isClosed=True, color=(0, 255, 0))
+    return crop
 
 
 def test():
