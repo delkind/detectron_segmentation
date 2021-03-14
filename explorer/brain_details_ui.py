@@ -12,7 +12,7 @@ import pandas as pd
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 import matplotlib.pyplot as plt
 
-from annotate_cell_data import create_section_image, get_brain_bbox_and_image, create_section_contours
+from annotate_cell_data import create_section_image, get_brain_bbox_and_image, create_section_contours, get_contours
 from explorer.explorer_utils import is_file_up_to_date, plot_section_violin_diagram, plot_section_histograms, \
     init_model, predict_crop
 from explorer.ui import ExperimentsSelector
@@ -126,24 +126,44 @@ class SectionHistogramPlotter(object):
             if self.cell_model is None:
                 self.cell_model = init_model('output/new_cells/model_0324999.pth', 'cpu', 0.5)
 
-            url = f'{self.directory}/raw-unscaled-{self.experiment_id}-{self.section}.jpg'
-            if not os.path.isfile(url):
-                thumb, brain_bbox = get_brain_bbox_and_image(self.bboxes, self.directory, self.experiment_id,
-                                                             self.section, True, scale=1)
-                x, y, w, h = brain_bbox
-                cv2.imwrite(url, thumb)
-            else:
-                thumb = cv2.imread(url, cv2.IMREAD_GRAYSCALE)
-                x = 0
-                y = 0
+            # url = f'{self.directory}/raw-unscaled-{self.experiment_id}-{self.section}.jpg'
+            # if os.path.isfile(url):
+            #     thumb = cv2.imread(url, cv2.IMREAD_GRAYSCALE)
+            #     x = 0
+            #     y = 0
+            # else:
+            #     cv2.imwrite(url, thumb)
+            thumb, brain_bbox = get_brain_bbox_and_image(self.bboxes, self.directory, self.experiment_id,
+                                                         self.section, True, scale=1)
+            x, y, w, h = brain_bbox
 
             x += self.x_input.value * 2
             y += self.y_input.value * 2
 
-            thumb = thumb[y: y + 312, x: x + 312]
+            crop = thumb[y: y + 624, x: x + 624]
+
+            result = np.zeros((624, 624, 3), dtype=thumb.dtype)
+
+            for i in range(2):
+                for j in range(2):
+                    result[i * 312: i * 312 + 312, j * 312: j * 312 + 312, :] = cv2.cvtColor(
+                        predict_crop(crop[i * 312: i * 312 + 312, j * 312: j * 312 + 312], self.cell_model),
+                        cv2.COLOR_BGR2RGB)
+
+            cell_contours = get_contours(self.bboxes, self.full_data, self.directory, self.experiment_id, self.section)
+
+            src = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
+
+            for color, contours in cell_contours:
+                cv2.polylines(src, contours, color=(0, 255, 9), thickness=1, isClosed=True)
 
             with self.output:
-                plt.imshow(cv2.cvtColor(predict_crop(thumb, self.cell_model), cv2.COLOR_BGR2RGB))
+                fig, ax = plt.subplots(1, 2, figsize=(20, 10))
+                ax[0].imshow(result)
+                ax[0].set_title("Current prediction")
+                ax[1].imshow(src[y: y + 624, x: x + 624])
+                ax[1].set_title("Original prediction")
+                plt.show()
 
     def __init__(self, experiment_id, section, data, base_time, input_dir, structure_tree):
         self.structure_tree = structure_tree
