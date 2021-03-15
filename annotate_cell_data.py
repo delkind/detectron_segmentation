@@ -3,6 +3,7 @@ import itertools
 import math
 import os
 import pickle
+from collections import defaultdict
 
 import cv2
 import matplotlib
@@ -88,11 +89,15 @@ def get_contours(bboxes, celldata, directory, experiment_id, section):
         cnts = [cnt for cnt in cnts if cnt.shape[0] > 2]
         polygons = [Polygon((cnt.squeeze() + np.array([x, y])) // 64).centroid for cnt in cnts]
         polygons = [(int(p.x), int(p.y)) for p in polygons]
-        cell_contours += [
-            {k: [cnt.squeeze() + np.array([x, y]) for i, cnt in enumerate(cnts) if coords.get(polygons[i], 0) == k]
-             for k in unique_numbers}]
-    cell_contours = [(colors[k], list(itertools.chain.from_iterable([c.get(k, []) for c in cell_contours])))
-                     for k in unique_numbers]
+        cts_dict = defaultdict(list)
+        for i, cnt in enumerate(cnts):
+            cts_dict[coords.get(polygons[i], 0)].append(cnt.squeeze() + np.array([x, y]))
+
+        cell_contours += [cts_dict]
+
+    all_keys = set.intersection(*[set(d.keys()) for d in cell_contours])
+    cell_contours = [(colors.get(k, [0, 255, 0]),
+                      list(itertools.chain.from_iterable([c.get(k, []) for c in cell_contours]))) for k in all_keys]
     return cell_contours
 
 

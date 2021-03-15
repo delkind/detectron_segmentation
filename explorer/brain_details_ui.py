@@ -155,7 +155,7 @@ class SectionHistogramPlotter(object):
             src = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
 
             for color, contours in cell_contours:
-                cv2.polylines(src, contours, color=(0, 255, 9), thickness=1, isClosed=True)
+                cv2.polylines(src, contours, color=(0, 255, 0), thickness=1, isClosed=True)
 
             with self.output:
                 fig, ax = plt.subplots(1, 2, figsize=(20, 10))
