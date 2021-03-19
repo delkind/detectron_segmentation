@@ -5,6 +5,9 @@ import sys
 from collections import defaultdict
 from multiprocessing import Pool
 
+import cv2
+import numpy as np
+
 import pandas as pd
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 from tqdm import tqdm
@@ -36,6 +39,9 @@ def create_stats(experiments):
     return list(tqdm(pool.imap(process_experiment, experiments),
                      "Processing experiments",
                      total=len(experiments)))
+    # return list(tqdm(map(process_experiment, experiments),
+    #                  "Processing experiments",
+    #                  total=len(experiments)))
 
 
 def calculate_stats(cells, globs):
@@ -47,9 +53,12 @@ def calculate_stats(cells, globs):
         **{field: {
             'mean': cells[field].mean() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
             'median': cells[field].median() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
-            'percentile10': cells[field].quantile(0.1) * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
-            'percentile90': cells[field].quantile(0.9) * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
-            'percentile95': cells[field].quantile(0.95) * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
+            'percentile10': cells[field].quantile(0.1) * 10.0 ** (3 * conversion.get(field, 0)) if len(
+                cells) > 0 else 0,
+            'percentile90': cells[field].quantile(0.9) * 10.0 ** (3 * conversion.get(field, 0)) if len(
+                cells) > 0 else 0,
+            'percentile95': cells[field].quantile(0.95) * 10.0 ** (3 * conversion.get(field, 0)) if len(
+                cells) > 0 else 0,
         } for field in ['coverage', 'area', 'perimeter']},
     }
 
@@ -91,9 +100,38 @@ def get_struct_aggregates(relevant_structs):
 
 
 def process_experiment(t):
-    experiment, data_dir = t
+    experiment, data_dir, struct_data_dir = t
     try:
         cells = retrieve_celldata(experiment, data_dir)
+
+        relevant_structs = cells.structure_id.unique().tolist()
+
+        struct_paths = [set(s['structure_id_path'])
+                        for s in mcc.get_structure_tree().get_structures_by_id(relevant_structs)]
+        relevant_structs = set.union(*struct_paths)
+
+        seg = np.load(f'{struct_data_dir}/{experiment}/{experiment}-sections.npz')['arr_0']
+
+        with open(f'{data_dir}/{experiment}/bboxes.pickle', 'rb') as f:
+            bboxes = pickle.load(f)
+        sections = sorted([s for s in bboxes.keys() if bboxes[s]])
+        sections = {s: cv2.imread(f"{data_dir}/{experiment}/thumbnail-{experiment}-{s}.jpg", cv2.IMREAD_COLOR)
+                    for s in sections}
+        sections_gray = {s: cv2.imread(f"{data_dir}/{experiment}/thumbnail-{experiment}-{s}.jpg", cv2.IMREAD_GRAYSCALE)
+                         for s in sections}
+
+        relevant_structs = relevant_structs.intersection(set(np.unique(seg).tolist()))
+        brightness_data = dict()
+        for struct in relevant_structs:
+            struct_map = np.isin(seg, list(structs_descendants.get(struct, [])))
+            brightness = np.concatenate([data[:struct_map.shape[0], :struct_map.shape[1]][struct_map[:data.shape[0],
+                                                                                          :data.shape[1], section]]
+                                         for section, data in sections_gray.items()])
+            injection = np.concatenate([data[:struct_map.shape[0], :struct_map.shape[1], 1]
+                                        [struct_map[:data.shape[0], :data.shape[1], section]]
+                                        for section, data in sections.items()])
+            brightness_data[struct] = {'brightness': np.median(brightness), 'injection': np.median(injection)}
+
         maps = pickle.load(bz2.open(os.path.join(f'{data_dir}/{experiment}', f'maps.pickle.bz2'), 'rb'))
         globs = calculate_global_parameters(maps['globs'])
 
@@ -105,7 +143,8 @@ def process_experiment(t):
             reverse_structs[tuple(sorted(v))].append(k)
         aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs)
                           for struct_set in reverse_structs.keys()}
-        result = {acronyms[k]: data for s, data in aggregate_data.items() for k in reverse_structs[s]}
+        result = {acronyms[k]: {**data, **brightness_data.get(k, {'brightness': 0, 'injection': 0})}
+                  for s, data in aggregate_data.items() for k in reverse_structs[s]}
 
         return experiment, result
     except Exception as e:
@@ -118,10 +157,10 @@ def retrieve_celldata(experiment, data_dir):
     return pd.read_parquet(celldata_file)
 
 
-def perform_aggregation(data_dir):
+def perform_aggregation(data_dir, struct_data_dir):
     experiments = [i for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
     # experiments = ['100140949']
-    experiments = [(i, data_dir) for i in experiments]
+    experiments = [(i, data_dir, struct_data_dir) for i in experiments]
     stats_path = f'{data_dir}/../stats.pickle'
     results = create_stats(experiments)
 
@@ -132,7 +171,7 @@ def perform_aggregation(data_dir):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <data_dir>")
+    if len(sys.argv) < 3:
+        print(f"Usage: {sys.argv[0]} <data_dir> <struct_data_dir>")
         sys.exit(-1)
-    perform_aggregation(sys.argv[1])
+    perform_aggregation(sys.argv[1], sys.argv[2])
