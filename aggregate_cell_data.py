@@ -44,7 +44,7 @@ def create_stats(experiments):
     #                  total=len(experiments)))
 
 
-def calculate_stats(cells, globs):
+def calculate_stats(cells, globs, struct, sections, seg):
     params = set(list(globs.values())[0].keys())
     result = {p: sum([globs[s][p] for s in set(globs.keys()).intersection(set(cells.structure_id.unique().tolist()))])
               for p in params}
@@ -62,11 +62,23 @@ def calculate_stats(cells, globs):
         } for field in ['coverage', 'area', 'perimeter']},
     }
 
+    struct_map = np.isin(seg, list(struct))
+    brightnesses = [[d[struct_map[:d.shape[0], :d.shape[1], section]] for d in data]
+                    for section, data in sections.items()]
+    brightness, injection = tuple(zip(*brightnesses))
+
+    brightness = np.concatenate(brightness)
+    injection = np.concatenate(injection)
+
     result = {**result,
               'count': len(cells), 'count_left': len(cells[cells.side == 'left']),
               'count_right': len(cells[cells.side == 'right']), 'section_count': len(cells.section.unique()),
               'density': len(cells) / result['region_area'] if result['region_area'] > 0 else 0,
-              'density3d': result['count3d'] / result['volume'] if result['volume'] > 0 else 0
+              'density3d': result['count3d'] / result['volume'] if result['volume'] > 0 else 0,
+              'brightness': {'mean': np.mean(brightness), 'median': np.median(brightness),
+                             'percentile90': np.percentile(brightness, 90)},
+              'injection': {'mean': np.mean(injection), 'median': np.median(injection),
+                            'percentile90': np.percentile(injection, 90)},
               }
 
     return result
@@ -103,34 +115,15 @@ def process_experiment(t):
     experiment, data_dir, struct_data_dir = t
     try:
         cells = retrieve_celldata(experiment, data_dir)
-
-        relevant_structs = cells.structure_id.unique().tolist()
-
-        struct_paths = [set(s['structure_id_path'])
-                        for s in mcc.get_structure_tree().get_structures_by_id(relevant_structs)]
-        relevant_structs = set.union(*struct_paths)
-
         seg = np.load(f'{struct_data_dir}/{experiment}/{experiment}-sections.npz')['arr_0']
 
         with open(f'{data_dir}/{experiment}/bboxes.pickle', 'rb') as f:
             bboxes = pickle.load(f)
         sections = sorted([s for s in bboxes.keys() if bboxes[s]])
-        sections = {s: cv2.imread(f"{data_dir}/{experiment}/thumbnail-{experiment}-{s}.jpg", cv2.IMREAD_COLOR)
-                    for s in sections}
-        sections_gray = {s: cv2.imread(f"{data_dir}/{experiment}/thumbnail-{experiment}-{s}.jpg", cv2.IMREAD_GRAYSCALE)
-                         for s in sections}
-
-        relevant_structs = relevant_structs.intersection(set(np.unique(seg).tolist()))
-        brightness_data = dict()
-        for struct in relevant_structs:
-            struct_map = np.isin(seg, list(structs_descendants.get(struct, [])))
-            brightness = np.concatenate([data[:struct_map.shape[0], :struct_map.shape[1]][struct_map[:data.shape[0],
-                                                                                          :data.shape[1], section]]
-                                         for section, data in sections_gray.items()])
-            injection = np.concatenate([data[:struct_map.shape[0], :struct_map.shape[1], 1]
-                                        [struct_map[:data.shape[0], :data.shape[1], section]]
-                                        for section, data in sections.items()])
-            brightness_data[struct] = {'brightness': np.median(brightness), 'injection': np.median(injection)}
+        sections = {s: (cv2.imread(f"{data_dir}/{experiment}/thumbnail-{experiment}-{s}.jpg",
+                                   cv2.IMREAD_COLOR)[:seg.shape[0], :seg.shape[1], 1],
+                        cv2.imread(f"{data_dir}/{experiment}/thumbnail-{experiment}-{s}.jpg",
+                                   cv2.IMREAD_GRAYSCALE)[:seg.shape[0], :seg.shape[1]]) for s in sections}
 
         maps = pickle.load(bz2.open(os.path.join(f'{data_dir}/{experiment}', f'maps.pickle.bz2'), 'rb'))
         globs = calculate_global_parameters(maps['globs'])
@@ -141,8 +134,13 @@ def process_experiment(t):
         reverse_structs = defaultdict(list)
         for k, v in relevant_aggregates.items():
             reverse_structs[tuple(sorted(v))].append(k)
-        aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs)
-                          for struct_set in reverse_structs.keys()}
+
+        brightness_data = dict()
+        for struct in reverse_structs.keys():
+            brightness_data[struct] = {}
+
+        aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs, struct_set,
+                                                      sections, seg) for struct_set in reverse_structs.keys()}
         result = {acronyms[k]: {**data, **brightness_data.get(k, {'brightness': 0, 'injection': 0})}
                   for s, data in aggregate_data.items() for k in reverse_structs[s]}
 
