@@ -44,7 +44,7 @@ def create_stats(experiments):
     #                  total=len(experiments)))
 
 
-def calculate_stats(cells, globs, struct, sections, seg):
+def calculate_stats(cells, globs, structs, sections, seg):
     params = set(list(globs.values())[0].keys())
     result = {p: sum([globs[s][p] for s in set(globs.keys()).intersection(set(cells.structure_id.unique().tolist()))])
               for p in params}
@@ -62,7 +62,9 @@ def calculate_stats(cells, globs, struct, sections, seg):
         } for field in ['coverage', 'area', 'perimeter']},
     }
 
-    struct_map = np.isin(seg, list(struct))
+    structs = [d for s in structs for d in structs_descendants[s]]
+
+    struct_map = np.isin(seg, list(structs))
     brightnesses = [[d[struct_map[:d.shape[0], :d.shape[1], section]] for d in data]
                     for section, data in sections.items()]
     brightness, injection = tuple(zip(*brightnesses))
@@ -144,8 +146,8 @@ def process_experiment(t):
         for struct in reverse_structs.keys():
             brightness_data[struct] = {}
 
-        aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs, struct_set,
-                                                      sections, seg) for struct_set in reverse_structs.keys()}
+        aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs, structs,
+                                                      sections, seg) for struct_set, structs in reverse_structs.items()}
         result = {acronyms[k]: {**data, **brightness_data.get(k, {'brightness': 0, 'injection': 0})}
                   for s, data in aggregate_data.items() for k in reverse_structs[s]}
 
