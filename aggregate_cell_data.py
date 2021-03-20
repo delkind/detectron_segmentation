@@ -70,6 +70,11 @@ def calculate_stats(cells, globs, struct, sections, seg):
     brightness = np.concatenate(brightness)
     injection = np.concatenate(injection)
 
+    if len(brightness) == 0:
+        brightness = np.array([0, 0])
+    if len(injection) == 0:
+        injection = np.array([0, 0])
+
     result = {**result,
               'count': len(cells), 'count_left': len(cells[cells.side == 'left']),
               'count_right': len(cells[cells.side == 'right']), 'section_count': len(cells.section.unique()),
