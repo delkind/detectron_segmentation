@@ -78,8 +78,10 @@ def calculate_stats(cells, globs, structs, sections, seg):
         injection = np.array([0, 0])
 
     result = {**result,
-              'count': len(cells), 'count_left': len(cells[cells.side == 'left']),
-              'count_right': len(cells[cells.side == 'right']), 'section_count': len(cells.section.unique()),
+              'count': len(cells),
+              'count_left': len(cells[cells.side == 'left']),
+              'count_right': len(cells[cells.side == 'right']),
+              'section_count': len(cells.section.unique()),
               'density': len(cells) / result['region_area'] if result['region_area'] > 0 else 0,
               'density3d': result['count3d'] / result['volume'] if result['volume'] > 0 else 0,
               'brightness': {'mean': np.mean(brightness), 'median': np.median(brightness),
@@ -142,14 +144,9 @@ def process_experiment(t):
         for k, v in relevant_aggregates.items():
             reverse_structs[tuple(sorted(v))].append(k)
 
-        brightness_data = dict()
-        for struct in reverse_structs.keys():
-            brightness_data[struct] = {}
-
         aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs, structs,
                                                       sections, seg) for struct_set, structs in reverse_structs.items()}
-        result = {acronyms[k]: {**data, **brightness_data.get(k, {'brightness': 0, 'injection': 0})}
-                  for s, data in aggregate_data.items() for k in reverse_structs[s]}
+        result = {acronyms[k]: data for s, data in aggregate_data.items() for k in reverse_structs[s]}
 
         return experiment, result
     except Exception as e:
