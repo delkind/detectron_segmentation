@@ -80,9 +80,11 @@ class ExperimentImagesDownloader(DirWatcher):
         sections = [s for s in sorted(np.unique(locs[2]).tolist()) if s in images]
         bboxes = {section: self.extract_bounding_boxes(mask[:, :, section]) for section in sections}
         valid_sections = list(filter(lambda s: bboxes[s], sections))
+        self.logger.info(f"Experiment {experiment_id}, evaluating brightness...")
         brightness = self.calculate_brightness(bboxes, directory, experiment_id, images, valid_sections)
 
         if brightness < self.brightness_threshold:
+            self.logger.info(f"Experiment {experiment_id}: brightness less than required minimum, removing...")
             return False
 
         with open(f'{directory}/bboxes.pickle', 'wb') as f:
