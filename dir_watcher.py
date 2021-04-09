@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import sys
 import time
 from abc import abstractmethod, ABC
@@ -18,11 +19,14 @@ class DirWatcher(ABC):
         self.logger.addHandler(handler)
         for d in [intermediate_dir, results_dir]:
             os.makedirs(d, exist_ok=True)
+        self.initial_items = sorted([item for item in os.listdir(self.__input_dir__)
+                                     if os.path.isdir(os.path.join(self.__input_dir__, item))])
 
     def extract_item(self):
         while True:
-            items = sorted([item for item in os.listdir(self.__input_dir__)
-                            if os.path.isdir(os.path.join(self.__input_dir__, item))])
+            items = [item for item in os.listdir(self.__input_dir__)
+                     if os.path.isdir(os.path.join(self.__input_dir__, item))]
+            items = [i for i in self.initial_items if i in items]
 
             if not items:
                 return None, None
@@ -37,8 +41,11 @@ class DirWatcher(ABC):
 
     def handle_item(self, item, directory):
         try:
-            self.process_item(item, directory)
-            os.replace(os.path.join(self.__intermediate_dir__, item), os.path.join(self.__results_dir__, item))
+            retval = self.process_item(item, directory)
+            if retval is not None and not retval:
+                shutil.rmtree(os.path.join(self.__intermediate_dir__, item), ignore_errors=True)
+            else:
+                os.replace(os.path.join(self.__intermediate_dir__, item), os.path.join(self.__results_dir__, item))
         except Exception as e:
             if self.on_process_error(item, e):
                 self.logger.error("Irrecoverable error occurred. Exitting...")

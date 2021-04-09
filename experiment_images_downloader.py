@@ -1,3 +1,4 @@
+import argparse
 import ast
 import http.client
 import os
@@ -24,8 +25,9 @@ PIL.Image.MAX_IMAGE_PIXELS = None
 
 class ExperimentImagesDownloader(DirWatcher):
     def __init__(self, input_dir, process_dir, output_dir, structure_map_dir, structs, connectivity_dir,
-                 _processor_number):
+                 _processor_number, brightness_threshold, strains):
         super().__init__(input_dir, process_dir, output_dir, f'experiment-images-downloader-{_processor_number}')
+        self.brightness_threshold = brightness_threshold
         self.structs = ast.literal_eval(structs)
         self.segmentation_dir = structure_map_dir
         self.mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')
@@ -34,6 +36,17 @@ class ExperimentImagesDownloader(DirWatcher):
         self.structure_ids = set(structure_ids)
         self.image_api = ImageDownloadApi()
         self.bbox_dilation_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (14, 14))
+        exps = self.mcc.get_experiments(dataframe=True)
+        items = []
+        for s in strains:
+            males = exps[(exps.strain == s) & (exps.gender == 'M')].id.tolist()
+            females = exps[(exps.strain == s) & (exps.gender == 'F')].id.tolist()
+            min_len = min(len(males), len(females))
+            males = sorted(males[:min_len])
+            females = sorted(females[:min_len])
+            items += [str(i) for j in zip(males, females) for i in j]
+        self.initial_items = [i for i in items if i in self.initial_items] + [i for i in self.initial_items
+                                                                              if i not in items]
 
     def on_process_error(self, item, exception):
         retval = super().on_process_error(item, exception)
@@ -66,10 +79,35 @@ class ExperimentImagesDownloader(DirWatcher):
         locs = np.where(mask)
         sections = [s for s in sorted(np.unique(locs[2]).tolist()) if s in images]
         bboxes = {section: self.extract_bounding_boxes(mask[:, :, section]) for section in sections}
+        valid_sections = list(filter(lambda s: bboxes[s], sections))
+        brightness = self.calculate_brightness(bboxes, directory, experiment_id, images, valid_sections)
+
+        if brightness < self.brightness_threshold:
+            return False
+
         with open(f'{directory}/bboxes.pickle', 'wb') as f:
             pickle.dump(bboxes, f)
-        for section in filter(lambda s: bboxes[s], sections):
+
+        for section in valid_sections:
             self.process_section(directory, experiment_id, images, section, bboxes[section])
+
+    def calculate_brightness(self, bboxes, directory, experiment_id, images, valid_sections):
+        brightness = 0
+        for section in valid_sections:
+            self.download_snapshot(experiment_id, section, images[section], directory)
+            filename = f'{directory}/thumbnail-{experiment_id}-{section}.jpg'
+            image = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
+            total = 0
+            count = 0
+            for x, y, w, h in bboxes[section]:
+                crop = image[y: y + h, x: x + w]
+                pixels = crop[crop != 0]
+                total += pixels.sum()
+                count += pixels.shape[0]
+
+            brightness += total / count
+        brightness /= len(valid_sections)
+        return brightness
 
     def process_section(self, directory, experiment_id, images, section, bboxes):
         self.logger.info(f"Experiment {experiment_id}, downloading section {section}...")
@@ -128,6 +166,13 @@ class ExperimentImagesDownloader(DirWatcher):
         filename, _, _ = self.retrieve_url(filename, url)
         return filename
 
+    def download_brightness_snapshot(self, experiment_id, section, image_desc, directory):
+        url = f'https://connectivity.brain-map.org/cgi-bin/imageservice?path={image_desc["path"]}&' \
+              f'mime=1&zoom={2}&&filter=range&filterVals=0,534,0,1006,0,4095'
+        filename = f'{directory}/thumbnail-{experiment_id}-{section}.jpg'
+        filename, _, _ = self.retrieve_url(filename, url)
+        return filename
+
     def retrieve_url(self, filename, url, retries=10):
         if os.path.isfile(filename):
             self.logger.info(f"File {filename} already downloaded")
@@ -156,6 +201,13 @@ class ExperimentImagesDownloader(DirWatcher):
 class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
     def __init__(self):
         super().__init__("Connectivity experiment downloader")
+
+    def add_args(self, parser: argparse.ArgumentParser):
+        super().add_args(parser)
+        parser.add_argument('--brightness_threshold', '-b', action='store', default=30, type=int,
+                            help='Experiment brightness threshold')
+        parser.add_argument('--strains', action='store', default=('C57BL/6J', 'FVB.CD1(ICR)'),
+                            help='Experiment brightness threshold')
 
     def prepare_input(self, input_dir, connectivity_dir, structure_map_dir, **kwargs):
         mcc = MouseConnectivityCache(manifest_file=f'{connectivity_dir}/mouse_connectivity_manifest.json')
