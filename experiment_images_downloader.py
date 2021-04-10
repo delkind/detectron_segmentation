@@ -81,7 +81,7 @@ class ExperimentImagesDownloader(DirWatcher):
         bboxes = {section: self.extract_bounding_boxes(mask[:, :, section]) for section in sections}
         valid_sections = list(filter(lambda s: bboxes[s], sections))
         self.logger.info(f"Experiment {experiment_id}, evaluating brightness...")
-        brightness = self.calculate_brightness(bboxes, directory, experiment_id, images, valid_sections)
+        brightness = self.calculate_brightness(directory, experiment_id, images, valid_sections, mask)
 
         if brightness < self.brightness_threshold:
             self.logger.info(f"Experiment {experiment_id}: brightness less than required minimum, removing...")
@@ -93,23 +93,15 @@ class ExperimentImagesDownloader(DirWatcher):
         for section in valid_sections:
             self.process_section(directory, experiment_id, images, section, bboxes[section])
 
-    def calculate_brightness(self, bboxes, directory, experiment_id, images, valid_sections):
-        brightness = 0
+    def calculate_brightness(self, directory, experiment_id, images, valid_sections, mask):
+        pixels = np.zeros_like(mask, dtype=np.uint8)
         for section in valid_sections:
             self.download_snapshot(experiment_id, section, images[section], directory)
             filename = f'{directory}/thumbnail-{experiment_id}-{section}.jpg'
             image = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
-            total = 0
-            count = 0
-            for x, y, w, h in bboxes[section]:
-                crop = image[y: y + h, x: x + w]
-                pixels = crop[crop != 0]
-                total += pixels.sum()
-                count += pixels.shape[0]
+            pixels[:, :, section] = image[:mask.shape[0], :mask.shape[1]]
 
-            brightness += total / count
-        brightness /= len(valid_sections)
-        return brightness
+        return np.median(pixels[mask != 0])
 
     def process_section(self, directory, experiment_id, images, section, bboxes):
         self.logger.info(f"Experiment {experiment_id}, downloading section {section}...")
