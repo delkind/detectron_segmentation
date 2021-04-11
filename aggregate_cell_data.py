@@ -83,6 +83,12 @@ def calculate_stats(cells, globs, structs, sections, seg):
               'count_right': len(cells[cells.side == 'right']),
               'section_count': len(cells.section.unique()),
               'density': len(cells) / result['region_area'] if result['region_area'] > 0 else 0,
+              'density_left':
+                  len(cells[cells.side == 'left']) / result['region_area_left']
+                  if result['region_area_left'] > 0 else 0,
+              'density_right':
+                  len(cells[cells.side == 'right']) / result['region_area_right']
+                  if result['region_area_right'] > 0 else 0,
               'density3d': result['count3d'] / result['volume'] if result['volume'] > 0 else 0,
               'brightness': {'mean': np.mean(brightness), 'median': np.median(brightness),
                              'percentile90': np.percentile(brightness, 90)},
