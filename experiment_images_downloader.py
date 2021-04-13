@@ -1,6 +1,7 @@
 import argparse
 import ast
 import http.client
+import json
 import os
 import pickle
 import shutil
@@ -38,13 +39,14 @@ class ExperimentImagesDownloader(DirWatcher):
         self.bbox_dilation_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (14, 14))
         exps = self.mcc.get_experiments(dataframe=True)
         items = []
-        for s in strains:
-            males = exps[(exps.strain == s) & (exps.gender == 'M')].id.tolist()
-            females = exps[(exps.strain == s) & (exps.gender == 'F')].id.tolist()
-            min_len = min(len(males), len(females))
-            males = sorted(males[:min_len])
-            females = sorted(females[:min_len])
-            items += [str(i) for j in zip(males, females) for i in j]
+        for s, gs in strains.items():
+            strain_items = []
+            for g in gs:
+                strain_items += [sorted(exps[(exps.strain == s) & (exps.gender == g)].id.tolist())]
+            if strain_items:
+                min_len = min([len(i) for i in strain_items])
+                strain_items = [i[:min_len] for i in strain_items]
+                items += [str(i) for j in zip(*strain_items) for i in j]
         self.initial_items = [i for i in items if i in self.initial_items] + [i for i in self.initial_items
                                                                               if i not in items]
 
@@ -200,7 +202,8 @@ class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
         super().add_args(parser)
         parser.add_argument('--brightness_threshold', '-b', action='store', default=30, type=int,
                             help='Experiment brightness threshold')
-        parser.add_argument('--strains', action='store', default=('C57BL/6J', 'FVB.CD1(ICR)'),
+        parser.add_argument('--strains', action='store', type=json.loads,
+                            default={'C57BL/6J': ['F'], 'FVB.CD1(ICR)': ['M', 'F']},
                             help='Experiment brightness threshold')
 
     def prepare_input(self, input_dir, connectivity_dir, structure_map_dir, **kwargs):
