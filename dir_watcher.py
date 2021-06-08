@@ -26,7 +26,7 @@ class DirWatcher(ABC):
         while True:
             items = [item for item in os.listdir(self.__input_dir__)
                      if os.path.isdir(os.path.join(self.__input_dir__, item))]
-            items = [i for i in self.initial_items if i in items]
+            items = [i for i in self.initial_items if i in items] + [i for i in items if i not in self.initial_items]
 
             if not items:
                 return None, None

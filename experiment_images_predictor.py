@@ -3,8 +3,6 @@ import ast
 import itertools
 import os
 import pickle
-import re
-from collections import defaultdict
 
 import cv2
 import numpy as np

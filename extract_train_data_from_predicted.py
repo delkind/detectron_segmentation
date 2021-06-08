@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from detectron2.utils.visualizer import GenericMask
 
-from predict_experiment import create_crops_coords_list
+from experiment_images_predictor import create_crops_coords_list
 from rect import Rect
 
 source = """

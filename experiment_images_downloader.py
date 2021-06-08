@@ -203,7 +203,7 @@ class ExperimentDownloadTaskManager(ExperimentProcessTaskManager):
         parser.add_argument('--brightness_threshold', '-b', action='store', default=30, type=int,
                             help='Experiment brightness threshold')
         parser.add_argument('--strains', action='store', type=json.loads,
-                            default={'C57BL/6J': ['F'], 'FVB.CD1(ICR)': ['M', 'F']},
+                            default={'C57BL/6J': {'F': 70}, 'FVB.CD1(ICR)': ['M', 'F']},
                             help='Experiment brightness threshold')
 
     def prepare_input(self, input_dir, connectivity_dir, structure_map_dir, **kwargs):

@@ -1,4 +1,5 @@
 import argparse
+import os
 from os import listdir
 from os.path import isfile, join
 import numpy as np
@@ -6,7 +7,9 @@ import numpy as np
 import cv2
 from tqdm import tqdm
 
-from predict_experiment import get_downloaded_experiments
+
+def get_downloaded_experiments(output_dir):
+    return {int(f) for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f)) and f.isdecimal()}
 
 
 def verify_conversion(ctrs, mask):
