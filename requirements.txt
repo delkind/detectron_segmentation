@@ -37,7 +37,7 @@ termcolor==1.1.0
 torch
 torchvision==0.5.0
 tqdm
-urllib3==1.25.8
+urllib3==1.26.5
 Werkzeug==1.0.1
 yacs==0.1.6
 
