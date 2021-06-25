@@ -32,7 +32,7 @@ class DataSelector(widgets.VBox):
             self.experiment_selector, self.results_selector,
             widgets.HBox((self.add_button, self.remove_button, self.clear_button), layout=widgets.Layout(width='auto')),
             self.messages,
-            widgets.HBox((self.added, )),
+            widgets.HBox((self.added,)),
             self.output))
 
     def output_message(self, message):
@@ -96,8 +96,10 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         #                                                                              'rb'))))
         self.data_selector = DataSelector(data_dir, raw_data_selector)
         self.bins = widgets.IntSlider(min=10, max=100, value=50, description='Bins: ')
-        self.plot_button = widgets.Button(description='Plot')
-        self.plot_button.on_click(lambda b: self.plot())
+        self.plot_hist_button = widgets.Button(description='Plot histogram')
+        self.plot_hist_button.on_click(lambda b: self.plot_data(self.do_histogram_plot))
+        self.plot_violin_button = widgets.Button(description='Plot violin')
+        self.plot_violin_button.on_click(lambda b: self.plot_data(self.do_violin_plot))
         self.ttest_button = widgets.Button(description='T-Test')
         self.ttest_button.on_click(lambda b: self.test(stats.ttest_ind))
         self.kstest_button = widgets.Button(description='KS-Test')
@@ -112,7 +114,7 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             header,
             self.data_selector,
             self.messages,
-            widgets.HBox((self.plot_button, self.ttest_button, self.kstest_button)),
+            widgets.HBox((self.plot_hist_button, self.plot_violin_button, self.ttest_button, self.kstest_button)),
             self.output))
         self.histograms = dict()
 
@@ -121,7 +123,7 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         with self.messages:
             display(Markdown(message))
 
-    def plot(self):
+    def plot_data(self, plotter):
         values = self.data_selector.extract_values()
 
         if values:
@@ -135,14 +137,28 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
                 html = '<a download="{filename}" href="data:text/csv;base64,{payload}" target="_blank">{title}</a>'
                 html = html.format(payload=payload, title="Click to download data", filename='data.csv')
                 display(HTML(html))
-                fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-                for l, d in values.items():
-                    hist(ax, d, bins=self.bins.value, label=l)
-                ax.legend()
-                plt.show()
+                plotter(values)
         else:
             with self.messages:
                 self.messages.clear_output()
+
+    def do_histogram_plot(self, values):
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        for l, d in values.items():
+            hist(ax, d, bins=self.bins.value, label=l)
+        ax.legend()
+        plt.show()
+
+    @staticmethod
+    def do_violin_plot(values):
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        ax.violinplot(list(values.values()), showmeans=True, showmedians=True, showextrema=True)
+        ax.xaxis.set_tick_params(direction='out')
+        ax.xaxis.set_ticks_position('bottom')
+        ax.set_xticks(np.arange(1, len(values) + 1))
+        ax.set_xticklabels(list(values.keys()))
+        ax.set_xlim(0.25, len(values) + 0.75)
+        plt.show()
 
     def test(self, test):
         self.messages.clear_output()
