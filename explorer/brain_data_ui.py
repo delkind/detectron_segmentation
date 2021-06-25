@@ -153,7 +153,7 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
     def do_violin_plot(values):
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         ax.violinplot(list(values.values()), showmeans=True, showmedians=True, showextrema=True)
-        ax.xaxis.set_tick_params(direction='out')
+        ax.xaxis.set_tick_params(direction='out', rotation=67)
         ax.xaxis.set_ticks_position('bottom')
         ax.set_xticks(np.arange(1, len(values) + 1))
         ax.set_xticklabels(list(values.keys()))
