@@ -155,7 +155,7 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         # ax.violinplot(list(values.values()), showmeans=True, showmedians=True, showextrema=True)
         data = pd.DataFrame({k: pd.Series(v) for k, v in values.items()})
         sns.violinplot(data=data, color='0.8', orient='v')
-        sns.stripplot(data=data)
+        sns.stripplot(data=data, alpha=0.5)
         ax.xaxis.set_tick_params(direction='out', rotation=67)
         ax.xaxis.set_ticks_position('bottom')
         plt.show()
