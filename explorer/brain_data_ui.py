@@ -1,12 +1,12 @@
 import base64
 import itertools
-import os
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
+import seaborn as sns
 from IPython.display import display, Markdown, HTML
 
 from explorer.explorer_utils import hist, retrieve_nested_path
@@ -152,12 +152,12 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
     @staticmethod
     def do_violin_plot(values):
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        ax.violinplot(list(values.values()), showmeans=True, showmedians=True, showextrema=True)
+        # ax.violinplot(list(values.values()), showmeans=True, showmedians=True, showextrema=True)
+        data = pd.DataFrame({k: pd.Series(v) for k, v in values.items()})
+        sns.violinplot(data=data, color='0.8', orient='v')
+        sns.stripplot(data=data)
         ax.xaxis.set_tick_params(direction='out', rotation=67)
         ax.xaxis.set_ticks_position('bottom')
-        ax.set_xticks(np.arange(1, len(values) + 1))
-        ax.set_xticklabels(list(values.keys()))
-        ax.set_xlim(0.25, len(values) + 0.75)
         plt.show()
 
     def test(self, test):
