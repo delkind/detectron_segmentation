@@ -1,4 +1,5 @@
 import base64
+import io
 import itertools
 
 import ipywidgets as widgets
@@ -133,32 +134,47 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
                 df = pd.DataFrame({k: pd.Series(v) for k, v in values.items()})
                 csv = df.to_csv()
                 b64 = base64.b64encode(csv.encode())
-                payload = b64.decode()
-                html = '<a download="{filename}" href="data:text/csv;base64,{payload}" target="_blank">{title}</a>'
-                html = html.format(payload=payload, title="Click to download data", filename='data.csv')
+                payload_csv = b64.decode()
+
+                fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+                plotter(values, ax)
+                buf = io.BytesIO()
+                plt.savefig(buf, format='pdf')
+                plt.close('all')
+                buf.seek(0)
+                b64 = base64.b64encode(buf.read())
+                payload_pdf = b64.decode()
+
+                html = '''<a download="{filename_csv}" href="data:text/csv;base64,{payload_csv}" target="_blank">{title_csv}</a><BR>
+                <a download="{filename_pdf}" href="data:application/pdf;base64,{payload_pdf}" target="_blank">{title_pdf}</a>
+                '''
+                html = html.format(payload_csv=payload_csv,
+                                   title_csv="Click to download data",
+                                   filename_csv='data.csv',
+                                   payload_pdf=payload_pdf,
+                                   title_pdf="Click to download PDF",
+                                   filename_pdf='plot.pdf')
                 display(HTML(html))
-                plotter(values)
+                fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+                plotter(values, ax)
+                plt.show()
         else:
             with self.messages:
                 self.messages.clear_output()
 
-    def do_histogram_plot(self, values):
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    def do_histogram_plot(self, values, ax):
         for l, d in values.items():
             hist(ax, d, bins=self.bins.value, label=l)
         ax.legend()
-        plt.show()
 
     @staticmethod
-    def do_violin_plot(values):
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    def do_violin_plot(values, ax):
         # ax.violinplot(list(values.values()), showmeans=True, showmedians=True, showextrema=True)
         data = pd.DataFrame({k: pd.Series(v) for k, v in values.items()})
-        sns.violinplot(data=data, color='0.8', orient='v')
-        sns.stripplot(data=data, alpha=0.5)
+        sns.violinplot(data=data, color='0.8', orient='v', ax=ax)
+        sns.stripplot(data=data, alpha=0.5, ax=ax)
         ax.xaxis.set_tick_params(direction='out', rotation=67)
         ax.xaxis.set_ticks_position('bottom')
-        plt.show()
 
     def test(self, test):
         self.messages.clear_output()
