@@ -12,6 +12,7 @@ from IPython.display import display, Markdown, HTML
 
 from explorer.explorer_utils import hist, retrieve_nested_path
 from explorer.ui import ExperimentsSelector, ResultsSelector
+from figures.util import get_subplots, produce_figure
 
 
 class DataSelector(widgets.VBox):
@@ -136,10 +137,10 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
                 b64 = base64.b64encode(csv.encode())
                 payload_csv = b64.decode()
 
-                fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+                fig, ax = get_subplots()
                 plotter(values, ax)
                 buf = io.BytesIO()
-                plt.savefig(buf, format='pdf')
+                produce_figure(ax, fig, "plot", buf=buf, format_xticks=False)
                 plt.close('all')
                 buf.seek(0)
                 b64 = base64.b64encode(buf.read())
