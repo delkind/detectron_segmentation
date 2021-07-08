@@ -82,7 +82,7 @@ class ExperimentCellsProcessor(object):
                 cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png',
                                       cv2.IMREAD_GRAYSCALE)
                 cnts, _ = cv2.findContours(cellmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                cnts = [c for c in cnts if math.pi < Polygon(cnts).area *
+                cnts = [c for c in cnts if math.pi < Polygon(cnts.squeeze()).area *
                         (self.subimages[section]['resolution'] ** 2) < math.pi * 36]
                 new_img = np.zeros_like(cellmask)
                 new_img = cv2.fillPoly(new_img, cnts, color=1)
