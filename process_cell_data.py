@@ -28,6 +28,8 @@ from experiment_process_task_manager import ExperimentProcessTaskManager
 from localize_brain import detect_brain
 from util import infinite_dict
 
+SLAB_SIZE = 6
+
 
 class ExperimentCellsProcessor(object):
     def __init__(self, mcc, experiment_id, directory, brain_seg_data_dir, parent_struct_id,
@@ -80,6 +82,8 @@ class ExperimentCellsProcessor(object):
                 cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png',
                                       cv2.IMREAD_GRAYSCALE)
                 cnts, _ = cv2.findContours(cellmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cnts = [c for c in cnts if math.pi < Polygon(cnts).area *
+                        (self.subimages[section]['resolution'] ** 2) < math.pi * 36]
                 new_img = np.zeros_like(cellmask)
                 new_img = cv2.fillPoly(new_img, cnts, color=1)
                 image[y: y + cellmask.shape[0], x: x + cellmask.shape[1]] = new_img
@@ -91,7 +95,6 @@ class ExperimentCellsProcessor(object):
             csv.at[csv.section == section, 'coverage'] = coverages / 4096
 
     def calculate_density3d(self, csv):
-        csv['density3d'] = 0
         min_section = csv.section.unique().min()
         densities3d = np.zeros((self.seg_data.shape[0] * 2, self.seg_data.shape[1] * 2,
                                 csv.section.unique().max() - min_section + 1), dtype=float)
@@ -100,7 +103,7 @@ class ExperimentCellsProcessor(object):
             self.logger.debug(f"Calculating 3d density for experiment {self.id} section {section}")
             centroids_y = (csv_section.centroid_y.to_numpy().astype(int) // 32).tolist()
             centroids_x = (csv_section.centroid_x.to_numpy().astype(int) // 32).tolist()
-            radii = np.sqrt(csv_section.area.to_numpy() / math.pi)
+            radii = csv_section.diameter / 2
             radii = list(zip(centroids_y, centroids_x, radii))
             radii = {label: tuple(r for _, _, r in value) for (label, value) in
                      groupby(radii, lambda x: (x[0], x[1]))}
@@ -111,13 +114,15 @@ class ExperimentCellsProcessor(object):
             radii = np.full((self.seg_data.shape[0] * 2, self.seg_data.shape[1] * 2), value, dtype=object)
 
             radii[y, x] = r
-            radii = [np.roll(radii, (i, j), (0, 1)) for i in range(-5, 5) for j in range(-5, 5)]
+            radii = [np.roll(radii, (i, j), (0, 1)) for i in range(-SLAB_SIZE // 2, SLAB_SIZE // 2)
+                     for j in range(-SLAB_SIZE // 2, SLAB_SIZE // 2)]
             radii = functools.reduce(np.add, radii)
-            compute_avg = np.vectorize(lambda t: sum(t) / len(t) if len(t) > 0 else 0, otypes=[float])
+            compute_avg = np.vectorize(lambda t: sum(t) / len(t) if t else 1, otypes=[float])
             compute_count = np.vectorize(lambda t: len(t))
-            counts = compute_count(radii)
-            radii = compute_avg(radii)
-            densities3d[:, :, section - min_section] = counts / (((0.35 * 320) ** 2) * (1.5 + 2 * (radii - 0.5)))
+            radii_counts = compute_count(radii)
+            avg_radii = compute_avg(radii)
+            densities3d[:, :, section - min_section] = radii_counts / (((0.35 * 32 * SLAB_SIZE) ** 2) *
+                                                                       (1.5 + 2 * np.sqrt(np.power(avg_radii, 2) - 1)))
 
         return min_section, csv.section.unique().max(), densities3d
 
@@ -416,7 +421,9 @@ class ExperimentCellsProcessor(object):
         cnts, _ = cv2.findContours(cell_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         offset = np.array([offset_x, offset_y])
         cnts = [Polygon(cnt.squeeze() + offset) for cnt in cnts if cnt.shape[0] > 2]
-        cnts = [poly for poly in cnts if mask[int(poly.centroid.y) // 64, int(poly.centroid.x) // 64]]
+        cnts = [poly for poly in cnts
+                if mask[int(poly.centroid.y) // 64, int(poly.centroid.x) // 64]
+                and math.pi < poly.area * (self.subimages[section]['resolution'] ** 2) < 36 * math.pi]
         return cnts
 
     def get_brain_metrics(self, section):
@@ -455,6 +462,7 @@ class ExperimentCellsProcessor(object):
                           'centroid_y': int(cell.centroid.y),
                           'side': 'left' if cell.centroid.x <= center_x else 'right',
                           'area': cell.area * (self.subimages[section]['resolution'] ** 2),
+                          'diameter': 2 * math.sqrt(cell.area * (self.subimages[section]['resolution'] ** 2) / math.pi),
                           'perimeter': cell.length * self.subimages[section]['resolution'], } for cell, struct_id in
                          zip(cells, struct_ids) if struct_id in self.structure_ids]
         return box_cell_data
