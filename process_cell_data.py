@@ -82,6 +82,7 @@ class ExperimentCellsProcessor(object):
                 cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png',
                                       cv2.IMREAD_GRAYSCALE)
                 cnts, _ = cv2.findContours(cellmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cnts = [c for c in cnts if c.shape[0] > 2]
                 cnts = [c for c in cnts if math.pi < Polygon(c.squeeze()).area *
                         (self.subimages[section]['resolution'] ** 2) < math.pi * 36]
                 new_img = np.zeros_like(cellmask)
@@ -202,7 +203,7 @@ class ExperimentCellsProcessor(object):
         celldata_struct = data_frame.iloc[celldata_indices]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
         if not relevant_sections:
-            return ()
+            return dict()
 
         dense_masks = np.zeros((self.seg_data.shape[0] * scaling_factor, self.seg_data.shape[1] * scaling_factor,
                                 max(relevant_sections) - min(relevant_sections) + 1), dtype=np.uint8)
@@ -268,7 +269,7 @@ class ExperimentCellsProcessor(object):
         celldata_structs = csv[csv.structure_id.isin(structures_including_dense)]
         relevant_sections = sorted(np.unique(celldata_structs.section.to_numpy()).tolist())
         if not relevant_sections:
-            return ()
+            return dict()
 
         dense_masks = np.zeros((self.seg_data.shape[0] * scaling_factor, self.seg_data.shape[1] * scaling_factor,
                                 max(relevant_sections) - min(relevant_sections) + 1,
