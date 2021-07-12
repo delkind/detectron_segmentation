@@ -35,33 +35,17 @@ conversion = {
 
 
 def create_stats(experiments):
-    pool = Pool(64)
-    return list(tqdm(pool.imap(process_experiment, experiments),
-                     "Processing experiments",
-                     total=len(experiments)))
-    # return list(tqdm(map(process_experiment, experiments),
-    #                  "Processing experiments",
-    #                  total=len(experiments)))
+    if len(experiments) == 1:
+        process_experiment(experiments[0])
+    else:
+        pool = Pool(64)
+        return list(tqdm(pool.imap(process_experiment, experiments),
+                         "Processing experiments",
+                         total=len(experiments)))
 
 
 def calculate_stats(cells, globs, structs, sections, seg):
-    params = set(list(globs.values())[0].keys())
-    result = {p: sum([globs[s][p] for s in set(globs.keys()).intersection(set(cells.structure_id.unique().tolist()))])
-              for p in params}
-    result = {
-        **{k: v * 10.0 ** (3 * conversion.get(k, 0)) for k, v in result.items()},
-        **{field: {
-            'mean': cells[field].mean() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
-            'median': cells[field].median() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
-            'percentile10': cells[field].quantile(0.1) * 10.0 ** (3 * conversion.get(field, 0)) if len(
-                cells) > 0 else 0,
-            'percentile90': cells[field].quantile(0.9) * 10.0 ** (3 * conversion.get(field, 0)) if len(
-                cells) > 0 else 0,
-            'percentile95': cells[field].quantile(0.95) * 10.0 ** (3 * conversion.get(field, 0)) if len(
-                cells) > 0 else 0,
-        } for field in ['coverage', 'area', 'perimeter']},
-    }
-
+    unique_sections = sorted(cells.section.unique().tolist())
     structs = [d for s in structs for d in structs_descendants[s]]
 
     struct_map = np.isin(seg, list(structs))
@@ -77,30 +61,60 @@ def calculate_stats(cells, globs, structs, sections, seg):
     if len(injection) == 0:
         injection = np.array([0, 0])
 
-    result = {**result,
-              'count': len(cells),
-              'count_left': len(cells[cells.side == 'left']),
-              'count_right': len(cells[cells.side == 'right']),
-              'section_count': len(cells.section.unique()),
-              'density': len(cells) / result['region_area'] if result['region_area'] > 0 else 0,
+    params = set(list(globs.values())[0]['all'].keys())
+    gl = {
+        p: sum([globs[s]['all'][p] for s in set(globs.keys()).intersection(set(cells.structure_id.unique().tolist()))])
+        for p in params}
+    gl = {
+        **{k: v * 10.0 ** (3 * conversion.get(k, 0)) for k, v in gl.items()},
+    }
+
+    result = {**gl,
+              'section_count': len(unique_sections),
               'density_left':
-                  len(cells[cells.side == 'left']) / result['region_area_left']
-                  if result['region_area_left'] > 0 else 0,
+                  len(cells[cells.side == 'left']) / gl['region_area_left']
+                  if gl['region_area_left'] > 0 else 0,
               'density_right':
-                  len(cells[cells.side == 'right']) / result['region_area_right']
-                  if result['region_area_right'] > 0 else 0,
-              'density3d': result['count3d'] / result['volume'] if result['volume'] > 0 else 0,
+                  len(cells[cells.side == 'right']) / gl['region_area_right']
+                  if gl['region_area_right'] > 0 else 0,
+              'density3d': gl['count3d'] / gl['volume'] if gl['volume'] > 0 else 0,
               'brightness': {'mean': np.mean(brightness), 'median': np.median(brightness),
                              'percentile90': np.percentile(brightness, 90)},
               'injection': {'mean': np.mean(injection), 'median': np.median(injection),
                             'percentile90': np.percentile(injection, 90)},
+              'density': len(cells) / gl['region_area'] if gl['region_area'] > 0 else 0,
+              **calculate_section_dependent_data(cells, globs),
+              **{'sections': {section: calculate_section_dependent_data(cells[cells.section == section], globs)
+                              for section in unique_sections}}
               }
 
     return result
 
 
+def calculate_section_dependent_data(cells, globs):
+    sections = cells.section.unique().tolist()
+    if len(sections) == 1:
+        area = sum([globs[s][sections[0]]['region_area'] * 10.0 ** (3 * conversion.get('region_area', 0)) for s in cells.structure_id.unique()])
+        density = len(cells) / area
+        appendix = {'region_area': area, 'density': density}
+    else:
+        appendix = dict()
+
+    return {**{field: {
+        'mean': cells[field].mean() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
+        'median': cells[field].median() * 10.0 ** (3 * conversion.get(field, 0)) if len(cells) > 0 else 0,
+        **{f'percentile{le}': cells[field].quantile(le / 100) * 10.0 ** (3 * conversion.get(field, 0)) if len(
+            cells) > 0 else 0 for le in [1, 5, 10, 90, 95, 99]},
+    } for field in ['coverage', 'area', 'perimeter', 'diameter']},
+            'count': len(cells),
+            'count_left': len(cells[cells.side == 'left']),
+            'count_right': len(cells[cells.side == 'right']),
+            **appendix
+            }
+
+
 def calculate_global_parameters(globs_per_section):
-    result = defaultdict(lambda: defaultdict(int))
+    result = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 
     for region, region_data in globs_per_section.items():
         section_pairs = list(zip(sorted(region_data.keys())[:-1], sorted(region_data.keys())[1:]))
@@ -111,11 +125,14 @@ def calculate_global_parameters(globs_per_section):
             volume = (region_data[s1]['region_area'] + region_data[s2]['region_area']) / 2 * 100 * max((s2 - s1), 1)
             density = (region_data[s1]['density3d'][0].sum() + region_data[s2]['density3d'][0].sum()) / (
                     region_data[s1]['density3d'][1] + region_data[s2]['density3d'][1])
-            result[region]['count3d'] += volume * density
-            result[region]['volume'] += volume
+            result[region]['all']['count3d'] += volume * density
+            result[region]['all']['volume'] += volume
 
         for param in ['region_area', 'region_area_left', 'region_area_right']:
-            result[region][param] = sum([a[param] for a in region_data.values()])
+            result[region]['all'][param] = sum([a[param] for a in region_data.values()])
+
+        for section in region_data.keys():
+            result[region][section] = region_data[section]
 
     return result
 
@@ -167,7 +184,6 @@ def retrieve_celldata(experiment, data_dir):
 
 def perform_aggregation(data_dir, struct_data_dir):
     experiments = [i for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
-    # experiments = ['100140949']
     experiments = [(i, data_dir, struct_data_dir) for i in experiments]
     stats_path = f'{data_dir}/../stats.pickle'
     results = create_stats(experiments)
