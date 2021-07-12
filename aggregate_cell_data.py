@@ -190,7 +190,6 @@ def perform_aggregation(data_dir, struct_data_dir):
 
     common_structs = set.intersection(*[set(v.keys()) for k, v in results])
     results = {k: {s: d for s, d in v.items() if s in common_structs} for k, v in results}
-    results = {k: v for k, v in results.items() if v['grey']['brightness']['median'] > 30.0}
     with open(stats_path, 'wb') as f:
         pickle.dump(results, f)
 
