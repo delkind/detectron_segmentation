@@ -38,7 +38,7 @@ def create_stats(experiments):
     if len(experiments) == 1:
         process_experiment(experiments[0])
     else:
-        pool = Pool(64)
+        pool = Pool(48)
         return list(tqdm(pool.imap(process_experiment, experiments),
                          "Processing experiments",
                          total=len(experiments)))
@@ -95,7 +95,7 @@ def calculate_section_dependent_data(cells, globs):
     sections = cells.section.unique().tolist()
     if len(sections) == 1:
         area = sum([globs[s][sections[0]]['region_area'] * 10.0 ** (3 * conversion.get('region_area', 0)) for s in cells.structure_id.unique()])
-        density = len(cells) / area
+        density = len(cells) / area if area != 0 else 0
         appendix = {'region_area': area, 'density': density}
     else:
         appendix = dict()
