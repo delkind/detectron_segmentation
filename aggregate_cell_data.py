@@ -36,7 +36,7 @@ conversion = {
 
 def create_stats(experiments):
     if len(experiments) == 1:
-        process_experiment(experiments[0])
+        return [process_experiment(experiments[0])]
     else:
         pool = Pool(48)
         return list(tqdm(pool.imap(process_experiment, experiments),
@@ -84,17 +84,19 @@ def calculate_stats(cells, globs, structs, sections, seg):
                             'percentile90': np.percentile(injection, 90)},
               'density': len(cells) / gl['region_area'] if gl['region_area'] > 0 else 0,
               **calculate_section_dependent_data(cells, globs),
-              **{'sections': {section: calculate_section_dependent_data(cells[cells.section == section], globs)
-                              for section in unique_sections}}
               }
 
-    return result
+    section_data = {section: calculate_section_dependent_data(cells[cells.section == section], globs)
+                    for section in unique_sections}
+
+    return result, section_data
 
 
 def calculate_section_dependent_data(cells, globs):
     sections = cells.section.unique().tolist()
     if len(sections) == 1:
-        area = sum([globs[s][sections[0]]['region_area'] * 10.0 ** (3 * conversion.get('region_area', 0)) for s in cells.structure_id.unique()])
+        area = sum([globs[s][sections[0]]['region_area'] * 10.0 ** (3 * conversion.get('region_area', 0)) for s in
+                    cells.structure_id.unique()])
         density = len(cells) / area if area != 0 else 0
         appendix = {'region_area': area, 'density': density}
     else:
@@ -169,9 +171,10 @@ def process_experiment(t):
 
         aggregate_data = {struct_set: calculate_stats(cells[cells.structure_id.isin(struct_set)], globs, structs,
                                                       sections, seg) for struct_set, structs in reverse_structs.items()}
-        result = {acronyms[k]: data for s, data in aggregate_data.items() for k in reverse_structs[s]}
+        result = {acronyms[k]: data[0] for s, data in aggregate_data.items() for k in reverse_structs[s]}
+        section_data = {acronyms[k]: data[1] for s, data in aggregate_data.items() for k in reverse_structs[s]}
 
-        return experiment, result
+        return experiment, result, section_data
     except Exception as e:
         print(f"Exception in experiment {experiment}")
         raise e
@@ -182,16 +185,41 @@ def retrieve_celldata(experiment, data_dir):
     return pd.read_parquet(celldata_file)
 
 
+def build_region_row(exp_id, region, reg_data):
+    params_dict = dict()
+    for param, param_data in reg_data.items():
+        if type(param_data) != dict:
+            params_dict[param] = param_data
+        else:
+            params_dict = {**params_dict, **{f'{param}|{stat}': stat_val for stat, stat_val in param_data.items()}}
+
+    params_dict = {
+        'experiment_id': int(exp_id),
+        'region': region,
+        **params_dict
+    }
+
+    return params_dict
+
+
 def perform_aggregation(data_dir, struct_data_dir):
     experiments = [i for i in os.listdir(data_dir) if os.path.isdir(f'{data_dir}/{i}')]
     experiments = [(i, data_dir, struct_data_dir) for i in experiments]
-    stats_path = f'{data_dir}/../stats.pickle'
-    results = create_stats(experiments)
+    stats_path = f'{data_dir}/../stats.parquet'
+    results_list = create_stats(experiments)
 
-    common_structs = set.intersection(*[set(v.keys()) for k, v in results])
-    results = {k: {s: d for s, d in v.items() if s in common_structs} for k, v in results}
-    with open(stats_path, 'wb') as f:
-        pickle.dump(results, f)
+    common_structs = set.intersection(*[set(v.keys()) for k, v, _ in results_list])
+    results = {k: {s: d for s, d in v.items() if s in common_structs} for k, v, _ in results_list}
+    data_rows = [build_region_row(exp_id, region, reg_data) for exp_id, exp_data in results.items()
+                 for region, reg_data in exp_data.items()]
+    data_frame = pd.DataFrame(data_rows)
+    data_frame.sort_values(['experiment_id', 'region']).to_parquet(stats_path)
+
+    section_data = {k: {s: d for s, d in v.items() if s in common_structs} for k, _, v in results_list}
+    for exp, data in section_data.items():
+        section_data_path = f'{data_dir}/../stats-sections-{exp}.pickle'
+        with open(section_data_path, 'wb') as f:
+            pickle.dump(data, f)
 
 
 if __name__ == '__main__':
