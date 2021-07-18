@@ -1,16 +1,15 @@
 import os
-import pickle
-
-import numpy as np
 from collections import defaultdict
-import scipy.stats
-from scipy.interpolate import interpn
-from matplotlib.colors import Normalize
-from matplotlib import cm
-import matplotlib.pyplot as plt
+
 import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+from matplotlib import cm
+from matplotlib.colors import Normalize
 from matplotlib.ticker import FormatStrFormatter
+from scipy.interpolate import interpn
 
 fig_config = dict(
     path='none',
@@ -19,11 +18,12 @@ fig_config = dict(
     grid_linestyle='--',
     grid_color='r',
     annotation_text_offset=(5, 5),
-    annotation_text_size=20,
+    annotation_text_size=4,
     save_fig=False,
     display=True,
-    tick_labelsize=30,
-    tick_length=10,
+    tick_labelsize=4,
+    tick_length=2,
+    fig_size=(1.9, 1.9)
 )
 
 matplotlib.rcParams['pdf.fonttype'] = 42
@@ -47,11 +47,10 @@ region_to_upper = {
     mcc.get_structure_tree().get_id_acronym_map()['grey']: 'grey'
 }
 
-FIGSIZE = (24, 20)
-
 
 def load_data():
-    data = pickle.load(open('output/full_brain/stats.pickle', 'rb'))
+    data = pd.read_parquet('output/full_brain/stats.parquet')
+    # data = pd.read_parquet('stats.parquet')
     return data
 
 
@@ -93,7 +92,7 @@ def density_scatter(ax, x, y, fig=None, sort=True, bins=20, **kwargs):
         idx = z.argsort()
         x, y, z = x[idx], y[idx], z[idx]
 
-    ax.scatter(x, y, c=z, s=fig_config['dot_size'], **kwargs)
+    plot_scatter(ax, x, y, c=z, s=1)
 
     if fig is not None:
         norm = Normalize(vmin=np.min(z), vmax=np.max(z))
@@ -101,54 +100,17 @@ def density_scatter(ax, x, y, fig=None, sort=True, bins=20, **kwargs):
         cbar.ax.set_ylabel('Density')
 
 
-def extract_data(s, param, statistic='median'):
-    return s[param] if type(s[param]) != dict else s[param][statistic]
-
-
-def plot_correlation_histogram(data, param1, param2, statistic='median'):
-    res = produce_plot_data(data,
-                            {
-                                'param1': lambda s: extract_data(s, param1, statistic),
-                                'param2': lambda s: extract_data(s, param2, statistic),
-                            },
-                            {
-                                'param1': np.array,
-                                'param2': np.array
-                            })
-    correlation = []
-    regions = []
-    for region in res['param2'].keys():
-        x = np.copy(res['param2'][region])
-        y = np.copy(res['param1'][region])
-        valid_indices = np.where(x > 20)
-        x = x[valid_indices]
-        y = y[valid_indices]
-        if len(x) == 0 or len(y) == 0 or (x == x[0]).all() or (y == y[0]).all():
-            continue
-        correlation.append(scipy.stats.pearsonr(x, y)[0])
-        regions.append(region)
-        # valid_indices = np.where((y > np.percentile(y, 5)) & (y < np.percentile(y, 95)))
-        # plt.scatter(x[valid_indices], y[valid_indices])
-        # plt.xlabel("brightness")
-        # plt.ylabel(param)
-        # # plt.yscale('log')
-        # plt.title(f"Brightness vs {param} - {region}")
-        # plt.savefig(f"{param}_vs_brightness_{region}.pdf".replace('/', '_slash_'), dpi=100)
-        # plt.close()
-
-    correlation = np.array(correlation)
-    # regions = np.array(regions)
-    # co_counts, co_bins = np.histogram(correlation, np.arange(-10, 11) / 10)
-    # co_indices = np.digitize(correlation, co_bins)
-    # correlated_regions = (regions[co_indices > 15]).tolist()
-    n, bins, _ = plt.hist(correlation, 50, density=True)
-    plt.title(f"{param1} vs {param2}")
-    plt.show()
+def to_col_name(data, param, stat='median'):
+    if param not in set(data):
+        col_name = f'{param}|{stat}'
+    else:
+        col_name = param
+    return col_name
 
 
 def get_subplots():
     # plt.close()
-    return plt.subplots(figsize=FIGSIZE)
+    return plt.subplots(figsize=fig_config['fig_size'])
 
 
 def plot_grid(ax, vert_lines, horiz_lines, color=fig_config['grid_color'], linestyle=fig_config['grid_linestyle']):
@@ -167,8 +129,8 @@ def produce_figure(ax, fig, fpath, xlabel=None, ylabel=None, logscale=False, leg
     if legend:
         ax.legend(fontsize=fig_config['tick_labelsize'])
 
-    ax.set_xlabel(xlabel, fontsize=60)
-    ax.set_ylabel(ylabel, fontsize=60)
+    ax.set_xlabel(xlabel, fontsize=5)
+    ax.set_ylabel(ylabel, fontsize=5)
 
     ax.tick_params(axis='y', length=fig_config['tick_length'], labelsize=fig_config['tick_labelsize'])
     if format_yticks:
@@ -179,7 +141,7 @@ def produce_figure(ax, fig, fpath, xlabel=None, ylabel=None, logscale=False, leg
         ax.xaxis.set_major_formatter(FormatStrFormatter('%g'))
 
     for axis in ['top', 'bottom', 'left', 'right']:
-        ax.spines[axis].set_linewidth(4.0)
+        ax.spines[axis].set_linewidth(1.0)
 
     if logscale:
         ax.set_xscale('log')
@@ -213,11 +175,11 @@ def plot_annotations(ax, annotations, x_ann, y_ann, fontsize=fig_config['annotat
             textcoords='offset points',
         )
     if dot_color is not None:
-        ax.scatter(x_ann, y_ann, color=dot_color, s=fig_config['dot_size'])
+        plot_scatter(ax, x_ann, y_ann, color=dot_color)
 
 
-def plot_scatter(ax, x, y, s=fig_config['dot_size'], label=None, color=None):
-    ax.scatter(x, y, s=s, label=label, color=color)
+def plot_scatter(ax, x, y, s=fig_config['dot_size'], label=None, color=None, **kwargs):
+    ax.scatter(x, y, s=s, label=label, color=color, marker='.', edgecolors='none', **kwargs)
 
 
 def select_strain(data, strain):

@@ -104,6 +104,8 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         self.plot_violin_button.on_click(lambda b: self.plot_data(self.do_violin_plot))
         self.ttest_button = widgets.Button(description='T-Test')
         self.ttest_button.on_click(lambda b: self.test(stats.ttest_ind))
+        self.ranksum_button = widgets.Button(description='RankSum')
+        self.ranksum_button.on_click(lambda b: self.test(stats.ranksums))
         self.kstest_button = widgets.Button(description='KS-Test')
         self.kstest_button.on_click(lambda b: self.test(stats.kstest))
         self.output = widgets.Output()
@@ -116,7 +118,8 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             header,
             self.data_selector,
             self.messages,
-            widgets.HBox((self.plot_hist_button, self.plot_violin_button, self.ttest_button, self.kstest_button)),
+            widgets.HBox((self.plot_hist_button, self.plot_violin_button, self.ttest_button, self.kstest_button,
+                          self.ranksum_button)),
             self.output))
         self.histograms = dict()
 

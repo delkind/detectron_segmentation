@@ -149,19 +149,15 @@ class ExperimentsSelector(widgets.VBox):
 class ResultsSelector(widgets.HBox):
     def __init__(self, data):
         self.data = data
-        self.selectors = [widgets.Dropdown(values=['Loading...']) for i in range(6)]
-        for i, s in enumerate(self.selectors):
-            s.observe(lambda c, i=i: self.on_change(i, c))
-        self.tree = StructureTree(list(data.values())[0].keys(), multiple_selection=False)
-        self.template = list(list(data.values())[0].values())[0]
+        self.selector = widgets.Dropdown()
+        self.selector.options = [d for d in data if d not in {'experiment_id', 'region'}]
+        self.selector.value = self.selector.options[0]
+        self.selector.observe(self.on_change)
+        self.tree = StructureTree(data.region.unique(), multiple_selection=False)
         self.tree.layout.width = "100%"
         self.tree.layout.max_height = "240px"
         self.tree.layout.overflow_y = 'scroll'
-        for s in self.selectors[1:]:
-            self.enable_selector(s, False)
-        self.selectors[0].options = sorted(list(self.template.keys()))
-        self.selectors[0].value = self.selectors[0].options[0]
-        super().__init__([self.tree, widgets.HBox(self.selectors)])
+        super().__init__([self.tree, self.selector])
 
     @staticmethod
     def enable_selector(selector, mode):
@@ -173,29 +169,11 @@ class ResultsSelector(widgets.HBox):
             selector.layout.visibility = 'hidden'
 
     def get_available_brains(self):
-        return list(self.data.keys())
+        return list(self.data.experiment_id.unique())
 
-    def on_change(self, num, change):
-        if change['name'] == 'value' and self.selectors[num].options and self.selectors[num].value is not None:
-            val = self.template
-
-            for i in range(num):
-                val = val[self.selectors[i].value]
-
-            val = val[self.selectors[num].value]
-
-            if not isinstance(val, dict):
-                for i in range(num + 1, 6):
-                    self.enable_selector(self.selectors[i], False)
-            else:
-                old_value = self.selectors[num + 1].value
-                self.selectors[num + 1].options = sorted(list(val.keys()))
-                if old_value in val.keys():
-                    self.selectors[num + 1].value = old_value
-                else:
-                    self.selectors[num + 1].value = self.selectors[num + 1].options[0]
-                self.enable_selector(self.selectors[num + 1], True)
-                self.selectors[num + 1].disabled = len(self.selectors[num + 1].options) < 2
+    def on_change(self, change):
+        if change['name'] == 'value' and self.selector.options and self.selector.value is not None:
+            pass
 
     def get_selection(self, relevant_experiments):
         path = self.get_selection_path()
@@ -203,7 +181,8 @@ class ResultsSelector(widgets.HBox):
         if path is None:
             return None
 
-        return np.array([retrieve_nested_path(self.data[str(e)], path) for e in relevant_experiments])
+        return np.array(self.data[self.data.experiment_id.isin(relevant_experiments) &
+                                  (self.data.region == path[0])][path[1]])
 
     def get_selection_label(self):
         path = self.get_selection_path()
@@ -214,10 +193,10 @@ class ResultsSelector(widgets.HBox):
         return '.'.join(str(p) for p in path)
 
     def get_selection_path(self):
-        if len(self.tree.selected_nodes) != 1:
+        if len(self.tree.selected_nodes) != 1 or self.selector.value is None:
             return None
 
-        return [self.tree.selected_nodes[0].struct_id] + [s.value for s in self.selectors if s.value is not None]
+        return self.tree.selected_nodes[0].struct_id, self.selector.value
 
 
 class RawDataResultsSelector(widgets.VBox):

@@ -1,38 +1,40 @@
-import math
-
 import numpy as np
-import seaborn as sns
+import pandas as pd
 
 from figures.clean_data import plot_symmetry_score
-from figures.util import main_regions, produce_figure, mcc, produce_plot_data, get_subplots, fig_config, plot_scatter, \
-    plot_annotations, density_scatter, plot_grid
+from figures.util import main_regions, produce_figure, produce_plot_data, get_subplots, fig_config, plot_scatter, \
+    plot_annotations, density_scatter
 
 
 def plot_observed_vs_technical(data):
-    res = produce_log_lr_and_count(data)
-    regions = list(res['count'].keys())
+    region_counts = pd.DataFrame({'region': data.region,
+                                  'count': np.log10(data['count'])
+                                  }).groupby('region')['count']
+    regions = np.array(region_counts.mean().index)
+    x = region_counts.mean().to_numpy()
+    z = region_counts.std().to_numpy()
 
-    x = np.array([v for v in [res['count'][e] for e in regions]]).mean(axis=1)
-    y = np.array([v for v in [res['l/r'][e] for e in regions]])
-    y = np.sqrt(np.power(y, 2).sum(axis=1)) / y.shape[1]
-    z = np.array([res['count'][e] for e in regions]).std(axis=1)
+    y = pd.DataFrame({'region': data.region,
+                      'diff': np.log10((data.count_left + 1) / (data.count_right + 1)).pow(2)
+                      }).groupby('region')['diff'].sum().to_numpy()
+    y = np.sqrt(y) / data.experiment_id.nunique()
     fig, ax = get_subplots()
 
     for region, structs in main_regions.items():
-        indices = np.where(np.isin(regions, structs))
+        indices = np.isin(regions, structs)
         plot_scatter(ax, x[indices], y[indices], label=f'diff_{region}')
         plot_scatter(ax, x[indices], z[indices], label=f'std_{region}')
     produce_figure(ax, fig, fpath="observed_vs_technical", xlabel='mean', legend=True)
 
     fig, ax = get_subplots()
     for region, structs in main_regions.items():
-        indices = np.where(np.isin(regions, structs))
+        indices = np.isin(regions, structs)
         ax.scatter(x[indices], (z - y)[indices], s=fig_config['dot_size'], label=region)
 
     ann = np.where(y > 1)
     ann_x = x[ann]
     ann_y = (z-y)[ann]
-    ann_text = np.array(regions)[ann]
+    ann_text = regions[ann]
 
     plot_annotations(ax, ann_text, ann_x, ann_y)
     produce_figure(ax, fig, fpath="observed_vs_technical_diff", xlabel='mean', ylabel='std-diff', legend=True)
@@ -40,7 +42,7 @@ def plot_observed_vs_technical(data):
     fig, ax = get_subplots()
     for region, structs in main_regions.items():
         indices = np.where(np.isin(regions, structs))
-        ax.scatter(x[indices], (z/y)[indices], s=fig_config['dot_size'], label=region)
+        ax.scatter(x[indices], (z / y)[indices], s=fig_config['dot_size'], label=region)
 
     # for i, key in enumerate(regions):
     #     y_coord = (y/z)[i]
@@ -52,20 +54,9 @@ def plot_observed_vs_technical(data):
 
 
 def plot_logcount_vs_logdiff(data, remove_outliers):
-    res = produce_plot_data(data,
-                            {
-                                'left': lambda s: s['count_left'],
-                                'right': lambda s: s['count_right'],
-                                'count': lambda s: s['count_left'] + s['count_right']
-                            },
-                            {
-                                'left': np.array,
-                                'right': np.array,
-                                'count': np.array
-                            })
-    regions = list(res['count'].keys())
-    x = np.array([np.log10(res['count'][r] + 1) for r in regions]).flatten()
-    y = np.array([np.log10(res['left'][r] + 1) - np.log10(res['right'][r] + 1) for r in regions]).flatten()
+    x = np.log10(data['count'].to_numpy())
+    y = np.log10((data.count_left + 1).to_numpy() / (data.count_right + 1).to_numpy())
+
     if remove_outliers:
         lower_threshold = np.percentile(y, 1)
         upper_threshold = np.percentile(y, 99)
@@ -80,18 +71,10 @@ def plot_logcount_vs_logdiff(data, remove_outliers):
 
 
 def plot_count_vs_diff(data):
-    res = produce_plot_data(data,
-                            {
-                                'l-r': lambda s: abs(s['count_left'] - s['count_right']),
-                                'count': lambda s: s['count']
-                            },
-                            {
-                                'l-r': np.array,
-                                'count': np.array
-                            })
-    regions = list(res['count'].keys())
-    x = np.array([np.mean([e for e in res['count'][r]]) for r in regions])
-    y = np.array([np.mean([e for e in res['l-r'][r]]) for r in regions])
+    regions = data.region.unique()
+    x = np.array([data.loc[data.region == r, 'count'].mean() for r in regions])
+    lr_diff = data.count_left - data.count_right
+    y = np.array([np.mean(lr_diff[data.region == r]) for r in regions])
     # z = np.array([np.std([e for e in res['count'][r]]) for r in regions])
 
     fig, ax = get_subplots()
@@ -101,26 +84,12 @@ def plot_count_vs_diff(data):
     produce_figure(ax, fig, fpath="count_vs_diff", xlabel='mean', ylabel='|l-r|', logscale=True, legend=True)
 
 
-def plot_count_vs_brightness(valid_data):
-    regions = list(list(valid_data.values())[0].keys())
-    count = np.log10(np.array([[valid_data[e][r]['count'] for e in valid_data.keys()] for r in regions]).flatten())
-    brightness = np.array([[valid_data[e][r]['brightness']['mean'] for e in valid_data.keys()] for r in regions]).flatten()
+def plot_count_vs_brightness(data):
+    count = np.log10(data['count'].to_numpy())
+    brightness = data['brightness|mean'].to_numpy()
     fig, ax = get_subplots()
     density_scatter(ax, count, brightness)
     produce_figure(ax, fig, "count_vs_brightness", 'logcount', 'brightness')
-
-
-def produce_log_lr_and_count(data):
-    res = produce_plot_data(data,
-                            {
-                                'l/r': lambda s: (s['count_left'] + 1)/(s['count_right'] + 1),
-                                'count': lambda s: math.log10(s['count'] + 1),
-                            },
-                            {
-                                'l/r': lambda l: np.abs(np.log10(l)),
-                                'count': np.array,
-                            })
-    return res
 
 
 def figure2(data, remove_outliers=False):
@@ -135,7 +104,6 @@ def figure2(data, remove_outliers=False):
     # plot_correlation_histogram(valid_data, "volume", "count")
     # plot_correlation_histogram(valid_data, "density", "count")
     # plot_correlation_histogram(valid_data, "coverage", "count")
-
 
 # import os
 # from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
