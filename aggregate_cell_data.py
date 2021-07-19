@@ -180,6 +180,26 @@ def process_experiment(t):
         raise e
 
 
+def process_experiment_section_data(experiment, experiment_data):
+    data = list()
+    for region, region_data in experiment_data.items():
+        d = defaultdict(list)
+        for section, section_data in region_data.items():
+            for param, param_data in section_data.items():
+                if isinstance(param_data, dict):
+                    d[param].append(param_data['mean'])
+                else:
+                    d[param].append(param_data)
+        reg_dict = dict()
+        for col in d.keys():
+            for i, val in enumerate(map(lambda x: x.mean() if x.shape[0] > 0 else 0, np.array_split(d[col], 10))):
+                reg_dict[f'{col}_{i}'] = val
+        reg_dict['experiment_id'] = experiment
+        reg_dict['region'] = region
+        data.append(reg_dict)
+    return data
+
+
 def retrieve_celldata(experiment, data_dir):
     celldata_file = os.path.join(f'{data_dir}/{experiment}', f'celldata-{experiment}.parquet')
     return pd.read_parquet(celldata_file)
@@ -207,19 +227,20 @@ def perform_aggregation(data_dir, struct_data_dir):
     experiments = [(i, data_dir, struct_data_dir) for i in experiments]
     stats_path = f'{data_dir}/../stats.parquet'
     results_list = create_stats(experiments)
+    section_data_path = f'{data_dir}/../stats-sections.parquet'
 
     common_structs = set.intersection(*[set(v.keys()) for k, v, _ in results_list])
-    results = {k: {s: d for s, d in v.items() if s in common_structs} for k, v, _ in results_list}
+    results = {int(k): {s: d for s, d in v.items() if s in common_structs} for k, v, _ in results_list}
     data_rows = [build_region_row(exp_id, region, reg_data) for exp_id, exp_data in results.items()
                  for region, reg_data in exp_data.items()]
     data_frame = pd.DataFrame(data_rows)
     data_frame.sort_values(['experiment_id', 'region']).to_parquet(stats_path)
 
-    section_data = {k: {s: d for s, d in v.items() if s in common_structs} for k, _, v in results_list}
+    section_data = {int(k): {s: d for s, d in v.items() if s in common_structs} for k, _, v in results_list}
+    section_data_list = list()
     for exp, data in section_data.items():
-        section_data_path = f'{data_dir}/../stats-sections-{exp}.pickle'
-        with open(section_data_path, 'wb') as f:
-            pickle.dump(data, f)
+        section_data_list += process_experiment_section_data(exp, data)
+    pd.DataFrame(section_data_list).sort_values(['experiment_id', 'region']).to_parquet(section_data_path)
 
 
 if __name__ == '__main__':
