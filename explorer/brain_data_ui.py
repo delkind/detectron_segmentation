@@ -79,7 +79,8 @@ class DataSelector(widgets.VBox):
             data = self.results_selector.get_selection(relevant_experiments)
             if isinstance(path, list):
                 for p, d in zip(path, data):
-                    self.add_data_item(d, p, relevant_experiments)
+                    if np.median(d) > 0:
+                        self.add_data_item(d[d != 0], p, relevant_experiments)
             else:
                 self.add_data_item(data, path, relevant_experiments)
 
