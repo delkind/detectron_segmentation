@@ -77,19 +77,22 @@ class DataSelector(widgets.VBox):
         else:
             path = self.results_selector.get_selection_label()
             data = self.results_selector.get_selection(relevant_experiments)
-
-            if data is None:
-                self.output_message(f'Nothing to add')
-                return
-
-            label = f"{self.experiment_selector.get_selection_label()}.{path} ({len(relevant_experiments)})"
-
-            if label not in self.data:
-                self.added.options += (label,)
-                self.data[label] = data
-                self.output_message(f'Added data for {len(relevant_experiments)} brains')
+            if isinstance(path, list):
+                for p, d in zip(path, data):
+                    self.add_data_item(d, p, relevant_experiments)
             else:
-                self.output_message(f'Already added')
+                self.add_data_item(data, path, relevant_experiments)
+
+    def add_data_item(self, data, path, relevant_experiments):
+        if data is None:
+            self.output_message(f'Nothing to add')
+        label = f"{self.experiment_selector.get_selection_label()}.{path} ({len(relevant_experiments)})"
+        if label not in self.data:
+            self.added.options += (label,)
+            self.data[label] = data
+            self.output_message(f'Added data for {len(relevant_experiments)} brains')
+        else:
+            self.output_message(f'Already added')
 
 
 class BrainAggregatesHistogramPlot(widgets.VBox):

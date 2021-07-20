@@ -199,6 +199,64 @@ class ResultsSelector(widgets.HBox):
         return self.tree.selected_nodes[0].struct_id, self.selector.value
 
 
+class SectionDataResultsSelector(widgets.HBox):
+    def __init__(self, data):
+        self.data = data
+        self.param_selector = widgets.Dropdown()
+        self.param_selector.options = list(set(d[:-2] for d in data if d not in {'experiment_id', 'region'}))
+        self.param_selector.value = self.param_selector.options[0]
+        self.param_selector.observe(self.on_change)
+        self.bin_selector = widgets.SelectMultiple()
+        self.bin_selector.options = list(range(10))
+        self.bin_selector.value = [self.bin_selector.options[0]]
+        self.bin_selector.observe(self.on_change)
+        self.tree = StructureTree(data.region.unique(), multiple_selection=False)
+        self.tree.layout.width = "100%"
+        self.tree.layout.max_height = "240px"
+        self.tree.layout.overflow_y = 'scroll'
+        super().__init__([self.tree, self.param_selector, self.bin_selector])
+
+    @staticmethod
+    def enable_selector(selector, mode):
+        if mode:
+            selector.layout.visibility = 'visible'
+        else:
+            selector.value = None
+            selector.options = []
+            selector.layout.visibility = 'hidden'
+
+    def get_available_brains(self):
+        return list(self.data.experiment_id.unique())
+
+    def on_change(self, change):
+        if change['name'] == 'value' and self.param_selector.options and self.param_selector.value is not None:
+            pass
+
+    def get_selection(self, relevant_experiments):
+        path = self.get_selection_path()
+
+        if path is None:
+            return None
+
+        return [np.array(self.data[self.data.experiment_id.isin(relevant_experiments) &
+                                  (self.data.region == path[0])][f'{path[1]}_{b}']) for b in path[2]]
+
+    def get_selection_label(self):
+        path = self.get_selection_path()
+
+        if path is None:
+            return None
+
+        return ['.'.join(str(p) for p in (path[:-1] + (b,))) for b in path[-1]]
+
+    def get_selection_path(self):
+        if len(self.tree.selected_nodes) != 1 or self.param_selector.value is None or \
+                self.bin_selector.value is None or not self.bin_selector.value:
+            return None
+
+        return self.tree.selected_nodes[0].struct_id, self.param_selector.value, [b for b in self.bin_selector.value]
+
+
 class RawDataResultsSelector(widgets.VBox):
     def __init__(self, data_dir):
         self.data_frames = DataFramesHolder(data_dir)
