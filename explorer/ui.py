@@ -331,6 +331,8 @@ class CropPredictor(widgets.VBox):
 
         with self.output:
             fig, ax = plt.subplots(1, len(self.upload.value), figsize=(len(self.upload.value) * 10, 10))
+            if len(self.upload.value) < 2:
+                ax = [ax]
             for i, (name, file_info) in enumerate(self.upload.value.items()):
                 crop = cv2.imdecode(np.frombuffer(file_info['content'], dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
                 ax[i].set_title(name)
