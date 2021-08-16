@@ -101,6 +101,8 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         # self.data_selector = DataSelector(data_dir, ResultsSelector(pickle.load(open(f'{data_dir}/../stats.pickle',
         #                                                                              'rb'))))
         self.data_selector = DataSelector(data_dir, raw_data_selector)
+        self.show_median = widgets.Checkbox(value=True, description='Show median', indent=True)
+        self.show_steps = widgets.Checkbox(value=True, description='Show raw histogram (steps)', indent=True)
         self.bins = widgets.IntSlider(min=10, max=100, value=50, description='Bins: ')
         self.plot_hist_button = widgets.Button(description='Plot histogram')
         self.plot_hist_button.on_click(lambda b: self.plot_data(self.do_histogram_plot))
@@ -112,6 +114,8 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         self.ranksum_button.on_click(lambda b: self.test(stats.ranksums))
         self.kstest_button = widgets.Button(description='KS-Test')
         self.kstest_button.on_click(lambda b: self.test(stats.kstest))
+        self.median_button = widgets.Button(description='Median')
+        self.median_button.on_click(lambda b: self.median())
         self.output = widgets.Output()
         self.messages = widgets.Output()
         header = widgets.Output()
@@ -122,8 +126,10 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             header,
             self.data_selector,
             self.messages,
-            widgets.HBox((self.plot_hist_button, self.plot_violin_button, self.ttest_button, self.kstest_button,
-                          self.ranksum_button)),
+            widgets.HBox((self.show_median, self.show_steps)),
+            widgets.HBox((self.bins, self.plot_hist_button, self.plot_violin_button, self.ttest_button,
+                          self.kstest_button,
+                          self.ranksum_button, self.median_button)),
             self.output))
         self.histograms = dict()
 
@@ -172,7 +178,7 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
 
     def do_histogram_plot(self, values, ax):
         for l, d in values.items():
-            hist(ax, d, bins=self.bins.value, label=l)
+            hist(ax, d, bins=self.bins.value, raw_hist=self.show_steps.value, median=self.show_median.value, label=l)
         ax.legend()
 
     @staticmethod
@@ -193,6 +199,14 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             with self.messages:
                 display(Markdown(
                     f'({values[keys[r]].mean() - values[keys[l]].mean()}) {keys[l]}, {keys[r]}: {str(test(values[keys[r]], values[keys[l]]))}'))
+
+    def median(self):
+        self.messages.clear_output()
+        values = self.data_selector.extract_values()
+        self.messages.clear_output()
+        for k in values.keys():
+            with self.messages:
+                display(Markdown(f'Median for ({k}): {np.median(values[k])}'))
 
 
 class BrainAggregatesScatterPlot(widgets.VBox):

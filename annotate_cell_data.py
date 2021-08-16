@@ -66,18 +66,11 @@ def get_brain_bbox_and_image(bboxes, directory, experiment_id, section, image_ne
     return thumb, brain_bbox.pad(5, 5).scale(64)
 
 
-def get_contours(bboxes, celldata, directory, experiment_id, section):
-    section_celldata = celldata[celldata.section == section]
-    structure_numbers = section_celldata.structure_id.to_numpy()
-    coords = (np.stack((section_celldata.centroid_x.to_numpy() // 64,
-                        section_celldata.centroid_y.to_numpy() // 64,
-                        structure_numbers)).swapaxes(0, 1)).astype(int)
-    coords = list(zip(*list(zip(*coords.tolist()))))
-    coords = {(x, y): v for x, y, v in coords}
-    unique_numbers = np.unique(structure_numbers).tolist()
-    colors = {k: v for k, v in zip(unique_numbers, [r['rgb_triplet'] for r in mcc.get_structure_tree().
-                                   get_structures_by_id(unique_numbers)])}
-    cell_contours = []
+def get_contours(bboxes, directory, experiment_id, section, brain_seg_data):
+    unique_numbers = list(set(np.unique(brain_seg_data[:, :, section]).tolist()) - {0})
+    colors = {**{k: v for k, v in zip(unique_numbers, [r['rgb_triplet'] for r in mcc.get_structure_tree().
+                                      get_structures_by_id(unique_numbers)])}, 0: [255, 255, 255]}
+    cts_dict = defaultdict(list)
     for bbox in bboxes[section]:
         x, y, w, h = bbox.scale(64)
         mask = cv2.imread(f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png',
@@ -89,21 +82,15 @@ def get_contours(bboxes, celldata, directory, experiment_id, section):
         cnts = [cnt for cnt in cnts if cnt.shape[0] > 2]
         polygons = [Polygon((cnt.squeeze() + np.array([x, y])) // 64).centroid for cnt in cnts]
         polygons = [(int(p.x), int(p.y)) for p in polygons]
-        cts_dict = defaultdict(list)
         for i, cnt in enumerate(cnts):
-            cts_dict[coords.get(polygons[i], 0)].append(cnt.squeeze() + np.array([x, y]))
+            cts_dict[brain_seg_data[polygons[i][1], polygons[i][0], section]].append(cnt.squeeze() + np.array([x, y]))
 
-        cell_contours += [cts_dict]
-
-    all_keys = set.intersection(*[set(d.keys()) for d in cell_contours])
-    cell_contours = [(colors.get(k, [0, 255, 0]),
-                      list(itertools.chain.from_iterable([c.get(k, []) for c in cell_contours]))) for k in all_keys]
-    return cell_contours
+    return [(colors[k], v) for k, v in cts_dict.items()]
 
 
-def create_section_image(section, experiment_id, directory, celldata, bboxes):
+def create_section_image(section, experiment_id, directory, celldata, bboxes, brain_seg_data):
     thumb, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, True)
-    cell_contours = get_contours(bboxes, celldata, directory, experiment_id, section)
+    cell_contours = get_contours(bboxes, directory, experiment_id, section, brain_seg_data)
 
     thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
 
@@ -114,9 +101,9 @@ def create_section_image(section, experiment_id, directory, celldata, bboxes):
     return thumb[y: y + h, x: x + w]
 
 
-def create_section_contours(section, experiment_id, directory, celldata, bboxes, path):
+def create_section_contours(section, experiment_id, directory, bboxes, path, brain_seg_data):
     thumb, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, False, scale=2)
-    cell_contours = get_contours(bboxes, celldata, directory, experiment_id, section)
+    cell_contours = get_contours(bboxes, directory, experiment_id, section, brain_seg_data)
 
     x, y, w, h = brain_bbox.scale(0.5)
     mask = np.zeros((h, w, 4), dtype=thumb.dtype)
@@ -142,15 +129,18 @@ def create_section_contours(section, experiment_id, directory, celldata, bboxes,
 
 
 class ExperimentDataAnnotator(object):
-    def __init__(self, experiment_id, directory, logger):
+    def __init__(self, experiment_id, directory, brain_seg_data_dir, logger):
         self.logger = logger
         self.directory = directory
         self.experiment_id = experiment_id
+        self.brain_seg_data_dir = brain_seg_data_dir
         with open(f'{self.directory}/bboxes.pickle', "rb") as f:
             bboxes = pickle.load(f)
         self.bboxes = {k: v for k, v in bboxes.items() if v}
         self.celldata = pd.read_parquet(f'{self.directory}/celldata-{self.experiment_id}.parquet')
         self.tile_dim = int(math.ceil(math.sqrt(len(self.bboxes))))
+        self.seg_data = np.load(f'{self.brain_seg_data_dir}/{self.experiment_id}/'
+                                f'{self.experiment_id}-sections.npz')['arr_0']
 
     @staticmethod
     def generate_colormap(N):
@@ -185,7 +175,8 @@ class ExperimentDataAnnotator(object):
             self.create_section_image(section)
 
     def create_section_image(self, section):
-        thumb = create_section_image(section, self.experiment_id, self.directory, self.celldata, self.bboxes)
+        thumb = create_section_image(section, self.experiment_id, self.directory, self.celldata, self.bboxes,
+                                     self.seg_data)
         cv2.imwrite(f"{self.directory}/annotated-{self.experiment_id}-{section}.jpg", thumb)
 
     def create_tiles(self, placer, name, zoom, **kwargs):

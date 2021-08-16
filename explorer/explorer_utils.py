@@ -8,6 +8,7 @@ import scipy.stats as stats
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 from detectron2.model_zoo import model_zoo
+import seaborn as sns
 
 from experiment_images_predictor import extract_predictions
 
@@ -23,11 +24,18 @@ def reject_outliers(data):
         return data
 
 
-def hist(ax, d, bins, **kwargs):
+def hist(ax, d, bins, raw_hist=False, median=False, **kwargs):
     d = reject_outliers(d)
     if len(d) > 2:
         _, hst = np.histogram(d, bins=bins)
-        ax.plot(hst, stats.gaussian_kde(d)(hst), **kwargs)
+        line = ax.plot(hst, stats.gaussian_kde(d)(hst), **kwargs)
+        if raw_hist:
+            ax.hist(d, bins=bins, histtype=u'step', density=True, color=line[0].get_color(), linestyle=':')
+        if median:
+            ax.axvline(x=np.median(d), color=line[0].get_color(), linestyle='--')
+        # sns.histplot(d, bins=bins, stat='density', element='step', kde=True, fill=False,
+        #              line_kws=dict(linestyle='--', alpha=0.5),
+        #              **kwargs)
     else:
         ax.hist([], bins=bins, **kwargs)
 

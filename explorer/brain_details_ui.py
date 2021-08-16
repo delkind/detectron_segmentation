@@ -57,7 +57,8 @@ class SectionHistogramPlotter(object):
             return button
 
     class AnnotationsButtonBar(widgets.HBox):
-        def __init__(self, experiment_id, full_data, section, base_time, input_dir, output):
+        def __init__(self, experiment_id, full_data, section, base_time, input_dir, output, seg_data_dir):
+            self.seg_data = np.load(f'{seg_data_dir}/{experiment_id}/{experiment_id}-sections.npz')['arr_0']
             self.output = output
             self.section = section
             self.full_data = full_data
@@ -87,11 +88,11 @@ class SectionHistogramPlotter(object):
 
         def build_contours(self):
             create_section_contours(self.section, self.experiment_id, self.directory,
-                                    self.full_data, self.bboxes, self.contours_url)
+                                    self.bboxes, self.contours_url, self.seg_data)
 
         def build_annotated(self):
             thumb = create_section_image(self.section, self.experiment_id, self.directory, self.full_data,
-                                         self.bboxes)
+                                         self.bboxes, self.seg_data)
             _, r, _ = detect_brain(cv2.cvtColor(thumb, cv2.COLOR_BGR2GRAY))
             cv2.imwrite(self.annotated_url, thumb[r.y: r.y + r.h, r.x: r.x + r.w])
 
@@ -150,7 +151,7 @@ class SectionHistogramPlotter(object):
                         predict_crop(crop[i * 312: i * 312 + 312, j * 312: j * 312 + 312], self.cell_model),
                         cv2.COLOR_BGR2RGB)
 
-            cell_contours = get_contours(self.bboxes, self.full_data, self.directory, self.experiment_id, self.section)
+            cell_contours = get_contours(self.bboxes, self.directory, self.experiment_id, self.section)
 
             src = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
 
@@ -165,7 +166,7 @@ class SectionHistogramPlotter(object):
                 ax[1].set_title("Original prediction")
                 plt.show()
 
-    def __init__(self, experiment_id, section, data, base_time, input_dir, structure_tree):
+    def __init__(self, experiment_id, section, data, base_time, input_dir, seg_data_dir, structure_tree):
         self.structure_tree = structure_tree
         self.experiment_id = experiment_id
         self.data = data
@@ -179,7 +180,7 @@ class SectionHistogramPlotter(object):
             self.section = int(section)
             display(widgets.Label(f"Experiment {self.experiment_id}, section {self.section}"))
             self.annotated_button_bar = self.AnnotationsButtonBar(self.experiment_id, self.data, self.section,
-                                                                  base_time, input_dir, self.output)
+                                                                  base_time, input_dir, self.output, seg_data_dir)
             display(self.output)
             display(widgets.HBox((self.annotated_button_bar,)))
             if os.path.isfile(f'{input_dir}/{experiment_id}/thumbnail-{self.experiment_id}-{section}.jpg'):
@@ -210,7 +211,8 @@ class SectionHistogramPlotter(object):
 
 
 class BrainDetailsSelector(widgets.VBox):
-    def __init__(self, input_dir):
+    def __init__(self, input_dir, seg_data_dir):
+        self.seg_data_dir = seg_data_dir
         self.mcc = MouseConnectivityCache(manifest_file=f'../mouse_connectivity/mouse_connectivity_manifest.json',
                                           resolution=25)
         self.input_dir = input_dir
@@ -272,15 +274,18 @@ class BrainDetailsSelector(widgets.VBox):
         with self.histograms_output:
             if section == 'all':
                 SectionHistogramPlotter(experiment_id, 'totals', full_data, full_data_mtime, self.input_dir,
+                                        self.seg_data_dir,
                                         self.mcc.get_structure_tree())
                 for section in sorted(full_data.section.unique().tolist()):
                     section_data = full_data[full_data.section == int(section)]
                     SectionHistogramPlotter(experiment_id, section, section_data, full_data_mtime, self.input_dir,
+                                            self.seg_data_dir,
                                             self.mcc.get_structure_tree())
             else:
                 if section != 'totals':
                     full_data = full_data[full_data.section == int(section)]
                 SectionHistogramPlotter(experiment_id, section, full_data, full_data_mtime, self.input_dir,
+                                        self.seg_data_dir,
                                         self.mcc.get_structure_tree())
 
 # plot = SectionHistogramPlotter('brain', full_data)
