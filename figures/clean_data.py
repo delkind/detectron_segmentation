@@ -1,11 +1,13 @@
 import itertools
+import math
 
 import numpy as np
 import pandas as pd
 import scipy.stats
 from sklearn.linear_model import LinearRegression
 
-from figures.util import produce_figure, main_regions, produce_plot_data, get_subplots, plot_grid, \
+from figures.figure1 import find_leaves
+from figures.util import produce_figure, main_regions, get_subplots, plot_grid, \
     plot_annotations, plot_scatter
 
 CORRELATION_THRESHOLD = 0.25
@@ -18,21 +20,29 @@ def prepare_data(data, plot=False):
     valid_data = data
     valid_data = filter_dark_brains(valid_data)
     valid_data = filter_small_regions(valid_data)
-    valid_data = filter_count_outliers(valid_data)
     valid_data = filter_brightness_correlated_data(valid_data, plot)
     valid_data = filter_asymmetric_regions(valid_data)
+    valid_data = filter_count_outliers(valid_data)
     return valid_data
 
 
-def filter_count_outliers(data, control_regions=('grey',)):
-    for r in control_regions:
-        reg_data = data[data.region == r]
-        reg_data = reg_data[(reg_data['count'] > reg_data['count'].quantile(0.05)) &
-                            (reg_data['count'] < reg_data['count'].quantile(0.95))]
-        valid_experiments = reg_data.experiment_id.unique().tolist()
-        data = data[data.experiment_id.isin(valid_experiments)]
+def filter_count_outliers(data):
+    regions = data.region.unique()
+    control_regions = regions[find_leaves(regions)]
 
-    return data
+    table = pd.pivot_table(data[data.region.isin(control_regions)],
+                           columns=['experiment_id', 'region'])['count'].unstack()
+    table = ((table - table.median()) / (table.mad() * 1.4826))
+
+    left_tail = table < -3
+    right_tail = table > 3
+
+    left_per_experiment = left_tail.transpose().sum()
+    right_per_experiment = right_tail.transpose().sum()
+    left_outliers = left_per_experiment[left_per_experiment > 3]
+    right_outliers = right_per_experiment[right_per_experiment > 3]
+
+    return data[~data.experiment_id.isin(left_outliers.index.to_list() + right_outliers.index.to_list())]
 
 
 def filter_asymmetric_regions(data, plot=False):
@@ -42,12 +52,12 @@ def filter_asymmetric_regions(data, plot=False):
         res = calculate_symmetry_score(data)
 
     res = pd.DataFrame(res.items(), columns=['region', 'score'])
-    return data[data.region.isin(res[res.score <= SYMMETRY_SCORE_THRESHOLD].region)]
+    return data[data.region.isin(res[res.score <= SYMMETRY_SCORE_THRESHOLD].region.unique())]
 
 
 def filter_small_regions(data):
-    means = data.groupby('region')['count'].mean()
-    regions = means[means > 20000].index.tolist()
+    means = data.groupby('region').median()
+    regions = means[(means['count'] > 500) & (means.volume > 0.3)].index.tolist()
     return data[data.region.isin(regions)]
 
 
@@ -59,22 +69,25 @@ def filter_dark_brains(data):
 def determine_correlation_thresholds(data, param1, param2, correlation_threshold=CORRELATION_THRESHOLD):
     res = {p: data.groupby('region')[p].apply(np.array).to_dict()
            for p in (param1, param2)}
-    experiments = data.groupby('region')['experiment_id'].apply(np.array).to_dict()['grey']
+    max_threshold = data[param2].max()
 
     results = dict()
     for region in res[param1].keys():
         x = np.copy(res[param2][region])
         y = np.copy(res[param1][region])
-        for br_threshold in range(5, 200, 5):
-            valid_indices = np.where(x > br_threshold)
+        for p2_threshold in range(5, 200, 5):
+            valid_indices = np.where(x > p2_threshold)
             x = x[valid_indices]
             y = y[valid_indices]
             if min(len(x), len(y)) < MIN_SAMPLE_COUNT:
                 break
             correlation, pvalue = scipy.stats.pearsonr(x, y)
             if abs(correlation) < correlation_threshold:
-                results[region] = (br_threshold, np.array(experiments)[valid_indices].tolist())
+                results[region] = (p2_threshold, data[(data.region == region) &
+                                                      (data[param2] > p2_threshold)].experiment_id.unique().tolist())
                 break
+        if region not in results:
+            results[region] = (max_threshold + 1, [])
 
     return results
 
@@ -115,8 +128,7 @@ def calculate_symmetry_score(data):
 def find_inflection_point(xs, ys):
     diffs = np.abs(ys[:-1] - ys[1:])
     inf_pts = np.where(diffs > 2)[0]
-    # return inf_pts[-1] if len(inf_pts) > 0 else -1
-    return -1
+    return inf_pts[-1] if len(inf_pts) > 0 else -1
 
 
 def determine_correlation_intersection(ax, data, plot=False, correlation_threshold=CORRELATION_THRESHOLD):
@@ -151,16 +163,11 @@ def filter_brightness_correlated_data(data, plot=False):
     else:
         fig, ax = (None, None)
 
-    thresholds, inf_pt, intersections, xs, ys = determine_correlation_intersection(ax, data, plot=plot)
+    # thresholds, inf_pt, intersections, xs, ys = determine_correlation_intersection(ax, data, plot=plot)
+    thresholds = determine_correlation_thresholds(data, 'count', 'brightness|median', CORRELATION_THRESHOLD)
 
     if plot:
         produce_figure(ax, fig, "valid_regions_vs_brains", "brains", "regions")
-
-    valid_structs = list(intersections[inf_pt][1])
-    valid_experiments = list(intersections[inf_pt][0])
-    valid_data = data[data.experiment_id.isin(valid_experiments) & data.region.isin(valid_structs)]
-
-    if plot:
         counts = data[data.region.isin(thresholds.keys())].groupby('region')['count'].mean().to_dict()
         regions = sorted([(k, sorted(list(g), key=lambda x: counts[x], reverse=True))
                           for k, g in itertools.groupby(sorted(thresholds.keys(),
@@ -168,8 +175,8 @@ def filter_brightness_correlated_data(data, plot=False):
                                                         lambda s: thresholds[s][0])], key=lambda x: x[0])
 
         fig, ax = get_subplots()
-        x = data[data.region == regions[0][1][1]]['count'].to_numpy()
-        y = data[data.region == regions[0][1][1]]['brightness|mean'].to_numpy()
+        x = data[data.region == regions[0][1][1]]['count'].dropna().to_numpy()
+        y = data[data.region == regions[0][1][1]]['brightness|mean'].dropna().to_numpy()
         reg = LinearRegression().fit(x.reshape(-1, 1), y)
         plot_scatter(ax, x, y)
         ax.plot(x, reg.predict(x.reshape(-1, 1)), color='blue', linewidth=3)
@@ -177,12 +184,26 @@ def filter_brightness_correlated_data(data, plot=False):
                        xlabel=f'{regions[0][1][1]}. corr: {scipy.stats.pearsonr(x, y)[0]:.2f}')
 
         fig, ax = get_subplots()
-        x = data[data.region == regions[-1][1][0]]['count'].to_numpy()
-        y = data[data.region == regions[-1][1][0]]['brightness|mean'].to_numpy()
+        x = data[data.region == regions[-1][1][0]]['count'].dropna().to_numpy()
+        y = data[data.region == regions[-1][1][0]]['brightness|mean'].dropna().to_numpy()
         reg = LinearRegression().fit(x.reshape(-1, 1), y)
         plot_scatter(ax, x, y)
         ax.plot(x, reg.predict(x.reshape(-1, 1)), color='blue', linewidth=3)
         produce_figure(ax, fig, "invalid_count_vs_brightness",
                        xlabel=f'{regions[-1][1][0]}. corr: {scipy.stats.pearsonr(x, y)[0]:.2f}')
 
-    return valid_data
+    nan_data = [[{'experiment_id': i, 'region': r, **{c: -12345 for c in data
+                                                      if c not in ['experiment_id', 'region']}}
+                 for i in set(data.experiment_id.unique()) - set(d[1])] for r, d in thresholds.items()]
+    nan_data = [e for ee in nan_data for e in ee]
+    nan_data = pd.DataFrame(nan_data).set_index(['experiment_id', 'region'])
+    data.set_index(['experiment_id', 'region'], inplace=True)
+    data.update(nan_data, overwrite=True)
+    data[data < 0] = math.nan
+    data.reset_index(inplace=True)
+
+    # valid_structs = list(intersections[inf_pt][1])
+    # valid_experiments = list(intersections[inf_pt][0])
+    # valid_data = data[data.experiment_id.isin(valid_experiments) & data.region.isin(valid_structs)]
+
+    return data

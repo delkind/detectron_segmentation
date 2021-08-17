@@ -18,18 +18,32 @@ class StructureTreeNode(ipytree.Node):
         super().__init__(name=name, nodes=children)
         self.struct_id = struct_id
         self.opened = False
+        self.parent = None
 
 
-class StructureTree(ipytree.Tree):
+class StructureTree(widgets.VBox):
     def __init__(self, ids, multiple_selection):
         self.ids = ids
         self.mcc = MouseConnectivityCache(manifest_file=f'../mouse_connectivity/mouse_connectivity_manifest.json',
                                           resolution=25)
         self.structure_tree = self.mcc.get_structure_tree()
+        self.nodes = dict()
+        self.tree_widget = ipytree.Tree(nodes=[], multiple_selection=multiple_selection,
+                                        layout=widgets.Layout(width='100%', overflow_y='scroll'))
+        self.fill_tree()
+        self.search = widgets.Dropdown(options=sorted(list(self.nodes.keys())))
+        if not multiple_selection:
+            self.search.observe(self.on_search, names=['value'])
+        if not multiple_selection:
+            super().__init__((self.search, self.tree_widget, ))
+        else:
+            super().__init__((self.tree_widget, ))
+
+    def fill_tree(self):
         node = self.fill_node('grey')
         while len(node.nodes) < 2:
             node = node.nodes[0]
-        super().__init__(nodes=[node], multiple_selection=multiple_selection)
+        self.tree_widget.add_node(node)
 
     def fill_node(self, start_node):
         start_struct = self.structure_tree.get_structures_by_acronym([start_node])[0]
@@ -43,10 +57,38 @@ class StructureTree(ipytree.Tree):
         node = StructureTreeNode(start_struct['acronym'],
                                  start_struct['acronym'],
                                  children)
+        for c in children:
+            c.parent = node
         if start_struct['acronym'] not in self.ids:
             node.disabled = True
+        else:
+            if not self.tree_widget.multiple_selection:
+                node.observe(self.on_tree_select, 'selected')
+
+        self.nodes[start_struct['acronym']] = node
 
         return node
+
+    def on_search(self, event):
+        node = self.nodes.get(event['new'], None)
+        if node is not None:
+            if not self.tree_widget.multiple_selection:
+                for n in self.nodes.values():
+                    n.open = False
+                    n.selected = False
+            node.selected = True
+            node.opened = False
+            parent = node.parent
+            while parent:
+                parent.opened = True
+                parent = parent.parent
+
+    def on_tree_select(self, event):
+        if event['new']:
+            self.search.value = event['owner'].struct_id
+
+    def get_selection(self):
+        return self.search.value
 
 
 class ExperimentsSelector(widgets.VBox):
@@ -182,7 +224,7 @@ class ResultsSelector(widgets.HBox):
             return None
 
         return np.array(self.data[self.data.experiment_id.isin(relevant_experiments) &
-                                  (self.data.region == path[0])][path[1]])
+                                  (self.data.region == path[0])][path[1]].dropna())
 
     def get_selection_label(self):
         path = self.get_selection_path()
@@ -193,10 +235,7 @@ class ResultsSelector(widgets.HBox):
         return '.'.join(str(p) for p in path)
 
     def get_selection_path(self):
-        if len(self.tree.selected_nodes) != 1 or self.selector.value is None:
-            return None
-
-        return self.tree.selected_nodes[0].struct_id, self.selector.value
+        return self.tree.get_selection(), self.selector.value
 
 
 class SectionDataResultsSelector(widgets.HBox):
@@ -239,7 +278,7 @@ class SectionDataResultsSelector(widgets.HBox):
             return None
 
         return [np.array(self.data[self.data.experiment_id.isin(relevant_experiments) &
-                                  (self.data.region == path[0])][f'{path[1]}_{b}']) for b in path[2]]
+                                   (self.data.region == path[0])][f'{path[1]}_{b}']) for b in path[2]]
 
     def get_selection_label(self):
         path = self.get_selection_path()
@@ -250,11 +289,7 @@ class SectionDataResultsSelector(widgets.HBox):
         return ['.'.join(str(p) for p in (path[:-1] + (b,))) for b in path[-1]]
 
     def get_selection_path(self):
-        if len(self.tree.selected_nodes) != 1 or self.param_selector.value is None or \
-                self.bin_selector.value is None or not self.bin_selector.value:
-            return None
-
-        return self.tree.selected_nodes[0].struct_id, self.param_selector.value, [b for b in self.bin_selector.value]
+        return self.tree.get_selection(), [b for b in self.bin_selector.value]
 
 
 class RawDataResultsSelector(widgets.VBox):
@@ -339,6 +374,3 @@ class CropPredictor(widgets.VBox):
                 ax[i].imshow(cv2.cvtColor(predict_crop(crop, self.cell_model), cv2.COLOR_BGR2RGB))
 
             plt.show()
-
-
-

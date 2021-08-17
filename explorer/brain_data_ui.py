@@ -87,7 +87,7 @@ class DataSelector(widgets.VBox):
     def add_data_item(self, data, path, relevant_experiments):
         if data is None:
             self.output_message(f'Nothing to add')
-        label = f"{self.experiment_selector.get_selection_label()}.{path} ({len(relevant_experiments)})"
+        label = f"{self.experiment_selector.get_selection_label()}.{path} ({len(relevant_experiments)}:{len(data)})"
         if label not in self.data:
             self.added.options += (label,)
             self.data[label] = data
@@ -190,16 +190,6 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         ax.xaxis.set_tick_params(direction='out', rotation=67)
         ax.xaxis.set_ticks_position('bottom')
 
-    def test(self, test):
-        self.messages.clear_output()
-        values = self.data_selector.extract_values()
-        keys = list(values.keys())
-        self.messages.clear_output()
-        for l, r in set(itertools.combinations(range(len(keys)), 2)):
-            with self.messages:
-                display(Markdown(
-                    f'({values[keys[r]].mean() - values[keys[l]].mean()}) {keys[l]}, {keys[r]}: {str(test(values[keys[r]], values[keys[l]]))}'))
-
     def median(self):
         self.messages.clear_output()
         values = self.data_selector.extract_values()
@@ -208,97 +198,15 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             with self.messages:
                 display(Markdown(f'Median for ({k}): {np.median(values[k])}'))
 
-
-class BrainAggregatesScatterPlot(widgets.VBox):
-    def __init__(self, data):
-        self.data = data
-        self.experiment_selector = ExperimentsSelector(data.keys())
-        self.results_selector_x = ResultsSelector(data)
-        self.results_selector_y = ResultsSelector(data)
-        self.add_button = widgets.Button(description='Add')
-        self.add_button.on_click(lambda b: self.add_data())
-        self.clear_button = widgets.Button(description='Reset')
-        self.clear_button.on_click(lambda b: self.reset_data())
-        self.plot_button = widgets.Button(description='Plot')
-        self.plot_button.on_click(lambda b: self.plot())
-        self.output = widgets.Output()
-        self.messages = widgets.Output()
-        self.added = widgets.SelectMultiple(options=[], layout=widgets.Layout(width='auto'))
-        header = widgets.Output()
-        with header:
-            display(Markdown("---"))
-            display(Markdown("## Scatter plot"), )
-        super().__init__((
-            header,
-            self.experiment_selector,
-            widgets.HBox((widgets.Label("X:", layout=widgets.Layout(width='auto')),
-                          self.results_selector_x)),
-            widgets.HBox((widgets.Label("Y:", layout=widgets.Layout(width='auto')),
-                          self.results_selector_y)),
-            widgets.HBox((self.add_button, self.clear_button), layout=widgets.Layout(width='auto')),
-            self.messages,
-            self.added,
-            self.plot_button,
-            self.output))
-        self.plot_data = dict()
-
-    def reset_data(self):
-        self.output.clear_output()
-        self.plot_data = {}
-        self.added.options = ()
-
-    def output_message(self, message):
+    def test(self, test):
         self.messages.clear_output()
-        with self.messages:
-            display(Markdown(message))
-
-    def plot(self):
-        if not self.plot_data:
-            self.output_message("Nothing to plot")
-            return
-
-        if self.added.value:
-            values = {k: self.plot_data[k] for k in self.added.value}
-        else:
-            values = self.plot_data
-
-        self.output.clear_output()
-
-        with self.output:
-            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-            for l, (x, y) in values.items():
-                print(x)
-                print(y)
-                ax.scatter(x, y, label=l)
-
-            lims = [
-                np.min([ax.get_xlim(), ax.get_ylim()]),  # min of both axes
-                np.max([ax.get_xlim(), ax.get_ylim()]),  # max of both axes
-            ]
-
-            ax.plot(lims, lims, 'k-', alpha=0.75, zorder=0)
-            ax.set_aspect('equal')
-            ax.set_xlim(lims)
-            ax.set_ylim(lims)
-            ax.legend()
-
-            ax.legend()
-            plt.show()
-
-    def add_data(self):
-        path_x = self.results_selector_x.get_selection()
-        path_y = self.results_selector_y.get_selection()
-        relevant_experiments = self.experiment_selector.get_selection()
-        if len(relevant_experiments) == 0:
-            self.output_message('Nothing to add, no relevant brains available')
-        else:
-            label = f"({len(relevant_experiments)}) {'.'.join(path_x)}:{'.'.join(path_y)} for {self.experiment_selector.get_selection_label()}"
-            if label not in self.plot_data:
-                self.output_message(f'Added data for {len(relevant_experiments)} brains')
-                self.added.options = self.added.options + (label,)
-                self.plot_data[label] = ((np.array([retrieve_nested_path(d, path_x)
-                                                    for e, d in self.data.items() if int(e) in relevant_experiments]),
-                                          np.array([retrieve_nested_path(d, path_y)
-                                                    for e, d in self.data.items() if int(e) in relevant_experiments])))
-            else:
-                self.output_message(f'Already added, ignored')
+        values = self.data_selector.extract_values()
+        keys = list(values.keys())
+        self.messages.clear_output()
+        for l, r in set(itertools.combinations(range(len(keys)), 2)):
+            with self.messages:
+                l_median = np.median(values[keys[r]])
+                r_median = np.median(values[keys[l]])
+                display(Markdown(
+                    f'({2 * (l_median - r_median) / (l_median + r_median)})'
+                    f' {keys[l]}, {keys[r]}: {str(test(values[keys[r]], values[keys[l]]))}'))
