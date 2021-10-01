@@ -16,7 +16,7 @@ from experiment_images_predictor import extract_predictions
 def reject_outliers(data):
     if len(data) > 2:
         clean_data = data[data < np.percentile(data, 99)]
-        if len(clean_data > 0):
+        if len(clean_data > 2):
             return clean_data
         else:
             return data
@@ -25,14 +25,15 @@ def reject_outliers(data):
 
 
 def hist(ax, d, bins, raw_hist=False, median=False, **kwargs):
-    d = reject_outliers(d)
+    m = np.median(d)
+    # d = reject_outliers(d)
     if len(d) > 2:
         _, hst = np.histogram(d, bins=bins)
         line = ax.plot(hst, stats.gaussian_kde(d)(hst), **kwargs)
         if raw_hist:
             ax.hist(d, bins=bins, histtype=u'step', density=True, color=line[0].get_color(), linestyle=':')
         if median:
-            ax.axvline(x=np.median(d), color=line[0].get_color(), linestyle='--')
+            ax.axvline(x=m, color=line[0].get_color(), linestyle='--')
         # sns.histplot(d, bins=bins, stat='density', element='step', kde=True, fill=False,
         #              line_kws=dict(linestyle='--', alpha=0.5),
         #              **kwargs)
