@@ -351,47 +351,55 @@ class ExperimentCellsProcessor(object):
                     np.where(region_cells[1] >= center_x)[0].shape[
                         0] * (
                             scale_factor ** 2)
-                densities = section_density_map[region_cells].flatten()
-                densities = (densities[densities != 0], len(densities))
-                globs_per_section[region][section]['density3d'] = densities
+
+                cells_left = (region_cells[0][np.where(region_cells[1] < center_x)],
+                              region_cells[1][np.where(region_cells[1] < center_x)])
+                cells_right = (region_cells[0][np.where(region_cells[1] >= center_x)],
+                              region_cells[1][np.where(region_cells[1] >= center_x)])
+                densities_left = section_density_map[cells_left].flatten()
+                densities_right = section_density_map[cells_right].flatten()
+                densities_left = (densities_left[densities_left != 0], len(densities_left))
+                densities_right = (densities_right[densities_right != 0], len(densities_right))
+                globs_per_section[region][section]['density3d_left'] = densities_left
+                globs_per_section[region][section]['density3d_right'] = densities_right
 
         return globs_per_section
 
     def process(self):
-        if os.path.isfile(f'{self.directory}/celldata-{self.id}.parquet') \
-                and os.path.isfile(f'{self.directory}/maps.pickle.bz2'):
-            self.logger.info(f"Loading cell data for {self.id}...")
-            cell_dataframe = pandas.read_parquet(f'{self.directory}/celldata-{self.id}.parquet')
-            maps = pickle.load(bz2.open(f'{self.directory}/maps.pickle.bz2', 'rb'))
-            dense_masks = maps['dense_masks']
-            density3d_maps = maps['density3d_maps']
-        else:
-            self.logger.info(f"Extracting cell data for {self.id}...")
-            sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
-            section_data = list()
-            cell_data = list()
-            for section in sections:
-                cells, sec = self.process_section(section)
-                section_data.append(sec)
-                cell_data += cells
+        # if os.path.isfile(f'{self.directory}/celldata-{self.id}.parquet') \
+        #         and os.path.isfile(f'{self.directory}/maps.pickle.bz2'):
+        #     self.logger.info(f"Loading cell data for {self.id}...")
+        #     cell_dataframe = pandas.read_parquet(f'{self.directory}/celldata-{self.id}.parquet')
+        #     maps = pickle.load(bz2.open(f'{self.directory}/maps.pickle.bz2', 'rb'))
+        #     dense_masks = maps['dense_masks']
+        #     density3d_maps = maps['density3d_maps']
+        # else:
+        self.logger.info(f"Extracting cell data for {self.id}...")
+        sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
+        section_data = list()
+        cell_data = list()
+        for section in sections:
+            cells, sec = self.process_section(section)
+            section_data.append(sec)
+            cell_data += cells
 
-            cell_dataframe = pandas.DataFrame(section_data)
-            cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
-            cell_dataframe = pandas.DataFrame(cell_data)
-            self.logger.info(f"Calculating density maps for {self.id}...")
-            density3d_maps = self.calculate_density3d(cell_dataframe)
-            self.logger.info(f"Calculating coverages for {self.id}...")
-            self.calculate_coverages(cell_dataframe)
+        cell_dataframe = pandas.DataFrame(section_data)
+        cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
+        cell_dataframe = pandas.DataFrame(cell_data)
+        self.logger.info(f"Calculating density maps for {self.id}...")
+        density3d_maps = self.calculate_density3d(cell_dataframe)
+        self.logger.info(f"Calculating coverages for {self.id}...")
+        self.calculate_coverages(cell_dataframe)
 
-            self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
-            cell_dataframe['dense'] = False
+        self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
+        cell_dataframe['dense'] = False
 
-            dense_masks = [self.detect_dense_ca(cell_dataframe)]
+        dense_masks = [self.detect_dense_ca(cell_dataframe)]
 
-            self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
-            dense_masks += [self.detect_dense_dg(cell_dataframe)]
+        self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
+        dense_masks += [self.detect_dense_dg(cell_dataframe)]
 
-            dense_masks = functools.reduce(lambda x, y: {**x, **y}, dense_masks)
+        dense_masks = functools.reduce(lambda x, y: {**x, **y}, dense_masks)
 
         self.logger.info(f"Calculating global parameters for {self.id}...")
         globs = self.calculate_global_parameters(density3d_maps, dense_masks, cell_dataframe)

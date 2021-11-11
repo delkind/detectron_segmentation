@@ -77,12 +77,14 @@ def calculate_stats(cells, globs, structs, sections, seg):
               'density_right':
                   len(cells[cells.side == 'right']) / gl['region_area_right']
                   if gl['region_area_right'] > 0 else 0,
+              'density': len(cells) / gl['region_area'] if gl['region_area'] > 0 else 0,
+              'density3d_left': gl['count3d_left'] / gl['volume_left'] if gl['volume_left'] > 0 else 0,
+              'density3d_right': gl['count3d_right'] / gl['volume_right'] if gl['volume_right'] > 0 else 0,
               'density3d': gl['count3d'] / gl['volume'] if gl['volume'] > 0 else 0,
               'brightness': {'mean': np.mean(brightness), 'median': np.median(brightness),
                              'percentile90': np.percentile(brightness, 90)},
               'injection': {'mean': np.mean(injection), 'median': np.median(injection),
                             'percentile90': np.percentile(injection, 90)},
-              'density': len(cells) / gl['region_area'] if gl['region_area'] > 0 else 0,
               **calculate_section_dependent_data(cells, globs),
               }
 
@@ -125,9 +127,22 @@ def calculate_global_parameters(globs_per_section):
 
         for s1, s2 in section_pairs:
             volume = (region_data[s1]['region_area'] + region_data[s2]['region_area']) / 2 * 100 * max((s2 - s1), 1)
-            density = (region_data[s1]['density3d'][0].sum() + region_data[s2]['density3d'][0].sum()) / (
-                    region_data[s1]['density3d'][1] + region_data[s2]['density3d'][1])
+            volume_left = (region_data[s1]['region_area_left'] + region_data[s2]['region_area_left']) / 2 * 100 * max(abs(s2 - s1), 1)
+            volume_right = (region_data[s1]['region_area_right'] + region_data[s2]['region_area_right']) / 2 * 100 * max(abs(s2 - s1), 1)
+            density3d_left_sum = region_data[s1]['density3d_left'][0].sum() + region_data[s2]['density3d_left'][0].sum()
+            density3d_left_len = region_data[s1]['density3d_left'][1] + region_data[s2]['density3d_left'][1]
+            density3d_right_sum = region_data[s1]['density3d_right'][0].sum() + region_data[s2]['density3d_right'][0].sum()
+            density3d_right_len = region_data[s1]['density3d_right'][1] + region_data[s2]['density3d_right'][1]
+
+            density = (density3d_left_sum + density3d_right_sum) / (density3d_left_len + density3d_right_len) if (density3d_left_len + density3d_right_len) != 0 else 0
+            density_left = density3d_left_sum / density3d_left_len if density3d_left_len != 0 else 0
+            density_right = density3d_right_sum / density3d_right_len if density3d_right_len != 0 else 0
+
+            result[region]['all']['count3d_left'] += volume_left * density_left
+            result[region]['all']['count3d_right'] += volume_right * density_right
             result[region]['all']['count3d'] += volume * density
+            result[region]['all']['volume_left'] += volume_left
+            result[region]['all']['volume_right'] += volume_right
             result[region]['all']['volume'] += volume
 
         for param in ['region_area', 'region_area_left', 'region_area_right']:
