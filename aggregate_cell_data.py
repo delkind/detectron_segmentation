@@ -26,6 +26,8 @@ else:
 
 conversion = {
     'volume': -3,
+    'volume_left': -3,
+    'volume_right': -3,
     'region_area_right': -2,
     'region_area': -2,
     'region_area_left': -2,
