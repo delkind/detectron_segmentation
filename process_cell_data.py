@@ -31,6 +31,12 @@ from util import infinite_dict
 SLAB_SIZE = 6
 
 
+def get_center_x(section_seg_data):
+    _, bbox, _ = detect_brain((section_seg_data != 0).astype(np.uint8) * 255)
+    center_x = bbox.x + bbox.w // 2
+    return center_x
+
+
 class ExperimentCellsProcessor(object):
     def __init__(self, mcc, experiment_id, directory, brain_seg_data_dir, parent_struct_id,
                  experiment_fields_to_save, details, logger, default_struct_id=997):
@@ -94,38 +100,6 @@ class ExperimentCellsProcessor(object):
             coverages = np.array([image[centroids_y[i] - 32: centroids_y[i] + 32,
                                   centroids_x[i] - 32: centroids_x[i] + 32].sum() for i in range(len(centroids_y))])
             csv.at[csv.section == section, 'coverage'] = coverages / 4096
-
-    def calculate_density3d(self, csv):
-        min_section = csv.section.unique().min()
-        densities3d = np.zeros((self.seg_data.shape[0] * 2, self.seg_data.shape[1] * 2,
-                                csv.section.unique().max() - min_section + 1), dtype=float)
-        for section in sorted(np.unique(csv.section)):
-            csv_section = csv[csv.section == section]
-            self.logger.debug(f"Calculating 3d density for experiment {self.id} section {section}")
-            centroids_y = (csv_section.centroid_y.to_numpy().astype(int) // 32).tolist()
-            centroids_x = (csv_section.centroid_x.to_numpy().astype(int) // 32).tolist()
-            radii = csv_section.diameter / 2
-            radii = list(zip(centroids_y, centroids_x, radii))
-            radii = {label: tuple(r for _, _, r in value) for (label, value) in
-                     groupby(radii, lambda x: (x[0], x[1]))}
-            y, x, r = zip(*[(y, x, r) for (y, x), r in radii.items()])
-
-            value = np.empty((), dtype=object)
-            value[()] = ()
-            radii = np.full((self.seg_data.shape[0] * 2, self.seg_data.shape[1] * 2), value, dtype=object)
-
-            radii[y, x] = r
-            radii = [np.roll(radii, (i, j), (0, 1)) for i in range(-SLAB_SIZE // 2, SLAB_SIZE // 2)
-                     for j in range(-SLAB_SIZE // 2, SLAB_SIZE // 2)]
-            radii = functools.reduce(np.add, radii)
-            compute_avg = np.vectorize(lambda t: sum(t) / len(t) if t else 1, otypes=[float])
-            compute_count = np.vectorize(lambda t: len(t))
-            radii_counts = compute_count(radii)
-            avg_radii = compute_avg(radii)
-            densities3d[:, :, section - min_section] = radii_counts / (((0.35 * 32 * SLAB_SIZE) ** 2) *
-                                                                       (1.5 + 2 * np.sqrt(np.power(avg_radii, 2) - 1)))
-
-        return min_section, csv.section.unique().max(), densities3d
 
     def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
         scale = 64 // (dense_masks.shape[0] // self.seg_data.shape[0])
@@ -303,10 +277,11 @@ class ExperimentCellsProcessor(object):
 
         return dense_masks_dict
 
-    def calculate_global_parameters(self, density3d_maps, dense_masks, cells):
+    def calculate_global_parameters(self, dense_masks, cells):
         relevant_sections = cells.section.unique()
         relevant_sections.sort()
         globs_per_section = infinite_dict()
+
         for section in relevant_sections:
             self.logger.debug(f"Calculating globals for section {section} of {self.id}...")
             section_seg_data = self.seg_data[:, :, section]
@@ -326,18 +301,7 @@ class ExperimentCellsProcessor(object):
                     relevant_cells = mask_section == (section - start)
                     section_seg_data[mask_y[relevant_cells], mask_x[relevant_cells]] = region
 
-            section_density_map = density3d_maps[2][:, :, section - density3d_maps[0]]
-
-            if section_density_map.shape[0] > section_seg_data.shape[0]:
-                ratio = section_density_map.shape[0] // section_seg_data.shape[0]
-                section_seg_data = np.kron(section_seg_data, np.ones((ratio, ratio), dtype=section_seg_data.dtype))
-            elif section_density_map.shape[0] < section_seg_data.shape[0]:
-                ratio = section_seg_data.shape[0] // section_density_map.shape[0]
-                section_density_map = np.kron(section_density_map,
-                                              np.ones((ratio, ratio), dtype=section_density_map.dtype))
-
-            _, bbox, _ = detect_brain((section_seg_data != 0).astype(np.uint8) * 255)
-            center_x = bbox.x + bbox.w // 2
+            center_x = get_center_x(section_seg_data)
             scale_factor = (0.35 * 64) / (section_seg_data.shape[0] / self.seg_data.shape[0])
             relevant_regions = np.intersect1d(np.unique(section_seg_data),
                                               cells[cells.section == section].structure_id.unique())
@@ -352,17 +316,6 @@ class ExperimentCellsProcessor(object):
                         0] * (
                             scale_factor ** 2)
 
-                cells_left = (region_cells[0][np.where(region_cells[1] < center_x)],
-                              region_cells[1][np.where(region_cells[1] < center_x)])
-                cells_right = (region_cells[0][np.where(region_cells[1] >= center_x)],
-                              region_cells[1][np.where(region_cells[1] >= center_x)])
-                densities_left = section_density_map[cells_left].flatten()
-                densities_right = section_density_map[cells_right].flatten()
-                densities_left = (densities_left[densities_left != 0], len(densities_left))
-                densities_right = (densities_right[densities_right != 0], len(densities_right))
-                globs_per_section[region][section]['density3d_left'] = densities_left
-                globs_per_section[region][section]['density3d_right'] = densities_right
-
         return globs_per_section
 
     def process(self):
@@ -372,7 +325,6 @@ class ExperimentCellsProcessor(object):
         #     cell_dataframe = pandas.read_parquet(f'{self.directory}/celldata-{self.id}.parquet')
         #     maps = pickle.load(bz2.open(f'{self.directory}/maps.pickle.bz2', 'rb'))
         #     dense_masks = maps['dense_masks']
-        #     density3d_maps = maps['density3d_maps']
         # else:
         self.logger.info(f"Extracting cell data for {self.id}...")
         sections = sorted([s for s in self.bboxes.keys() if self.bboxes[s]])
@@ -386,8 +338,6 @@ class ExperimentCellsProcessor(object):
         cell_dataframe = pandas.DataFrame(section_data)
         cell_dataframe.to_csv(f'{self.directory}/sectiondata-{self.id}.csv')
         cell_dataframe = pandas.DataFrame(cell_data)
-        self.logger.info(f"Calculating density maps for {self.id}...")
-        density3d_maps = self.calculate_density3d(cell_dataframe)
         self.logger.info(f"Calculating coverages for {self.id}...")
         self.calculate_coverages(cell_dataframe)
 
@@ -402,7 +352,7 @@ class ExperimentCellsProcessor(object):
         dense_masks = functools.reduce(lambda x, y: {**x, **y}, dense_masks)
 
         self.logger.info(f"Calculating global parameters for {self.id}...")
-        globs = self.calculate_global_parameters(density3d_maps, dense_masks, cell_dataframe)
+        globs = self.calculate_global_parameters(dense_masks, cell_dataframe)
         self.logger.info(f"Converting sparse CA structure IDs for {self.id}...")
         for struct in ['CA1', 'CA2', 'CA3']:
             sparse_id = self.mcc.get_structure_tree().get_structures_by_acronym([f'{struct}sr'])[0]['id']
@@ -417,7 +367,7 @@ class ExperimentCellsProcessor(object):
 
         self.logger.info(f"Saving global data for {self.id}...")
         maps = {
-            'density3d_maps': density3d_maps,
+            'dense_masks': dense_masks,
             'globs': globs
         }
         with bz2.open(f'{self.directory}/maps.pickle.bz2', 'wb') as f:
