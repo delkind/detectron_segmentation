@@ -122,7 +122,6 @@ def calculate_section_dependent_data(cells, globs):
 
 
 def get_densities(cells_region, centers, diameter, region_data, section):
-    cells_region = cells_region[(cells_region.diameter > 2) & (cells_region.diameter < 12)]
     density_left = len(cells_region[(cells_region.section == section) &
                                     (cells_region.centroid_x // 64 < centers[section])]) \
                    / (region_data[section]['region_area_left'] * (diameter + 1.5)) \
@@ -153,6 +152,7 @@ def calculate_global_parameters(cells, globs_per_section, seg):
             section_pairs = [tuple(region_data.keys()) * 2]
 
         cells_region = cells[cells.structure_id == region]
+        cells_region = cells_region[(cells_region.diameter > 2) & (cells_region.diameter < 12)]
 
         diameter = {q: cells_region.diameter.quantile(q) for q in quantiles}
 
