@@ -122,6 +122,7 @@ def calculate_section_dependent_data(cells, globs):
 
 
 def get_densities(cells_region, centers, diameter, region_data, section):
+    cells_region = cells_region[(cells_region.diameter > 2) & (cells_region.diameter < 12)]
     density_left = len(cells_region[(cells_region.section == section) &
                                     (cells_region.centroid_x // 64 < centers[section])]) \
                    / (region_data[section]['region_area_left'] * (diameter + 1.5)) \
@@ -138,6 +139,9 @@ def get_densities(cells_region, centers, diameter, region_data, section):
     return density_left, density_right, density
 
 
+quantiles = [0.5, 0.7, 0.9, 0.98]
+
+
 def calculate_global_parameters(cells, globs_per_section, seg):
     result = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 
@@ -149,25 +153,35 @@ def calculate_global_parameters(cells, globs_per_section, seg):
             section_pairs = [tuple(region_data.keys()) * 2]
 
         cells_region = cells[cells.structure_id == region]
-        diameter = cells_region.diameter.quantile(0.9)
+
+        diameter = {q: cells_region.diameter.quantile(q) for q in quantiles}
 
         for s1, s2 in section_pairs:
-            density1_left, density1_right, density1 = get_densities(cells_region, centers, diameter, region_data, s1)
-            density2_left, density2_right, density2 = get_densities(cells_region, centers, diameter, region_data, s2)
-
-            density_left = (density1_left + density2_left) / 2
-            density_right = (density1_right + density2_right) / 2
-            density = (density1 + density2) / 2
-
             volume = (region_data[s1]['region_area'] + region_data[s2]['region_area']) / 2 * 100 * max((s2 - s1), 1)
             volume_left = (region_data[s1]['region_area_left'] + region_data[s2]['region_area_left']) / 2 * 100 * max(
                 abs(s2 - s1), 1)
             volume_right = (region_data[s1]['region_area_right'] + region_data[s2][
                 'region_area_right']) / 2 * 100 * max(abs(s2 - s1), 1)
 
-            result[region]['all']['count3d_left'] += volume_left * density_left
-            result[region]['all']['count3d_right'] += volume_right * density_right
-            result[region]['all']['count3d'] += volume * density
+            for q in quantiles:
+                density1_left, density1_right, density1 = get_densities(cells_region, centers,
+                                                                        diameter[q], region_data, s1)
+                density2_left, density2_right, density2 = get_densities(cells_region, centers,
+                                                                        diameter[q], region_data, s2)
+
+                density_left = (density1_left + density2_left) / 2
+                density_right = (density1_right + density2_right) / 2
+                density = (density1 + density2) / 2
+
+                if q != 0.9:
+                    count_title = f'count3d_{q}'
+                else:
+                    count_title = 'count3d'
+
+                result[region]['all'][f'{count_title}_left'] += volume_left * density_left
+                result[region]['all'][f'{count_title}_right'] += volume_right * density_right
+                result[region]['all'][count_title] += volume * density
+
             result[region]['all']['volume_left'] += volume_left
             result[region]['all']['volume_right'] += volume_right
             result[region]['all']['volume'] += volume
