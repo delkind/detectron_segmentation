@@ -118,8 +118,7 @@ def create_section_contours(section, experiment_id, directory, bboxes, path, bra
     # ax.add_patch(plt.Rectangle((0, 0), w, h, color=(0, 0, 0), fill=False))
 
     for color, contours in cell_contours:
-        cv2.polylines(mask, [(c // 2) - np.array([x, y]) for c in contours], color=(tuple(color)[::-1]) + (255,),
-                      thickness=2, isClosed=True)
+        cv2.fillPoly(mask, [(c // 2) - np.array([x, y]) for c in contours], color=(tuple(color)[::-1]) + (255,))
         # for poly in contours:
         #     ax.add_patch(plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
         #                              closed=True, fill=False, color=np.array(color) / 255))
