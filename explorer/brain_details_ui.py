@@ -68,7 +68,7 @@ class SectionHistogramPlotter(object):
             self.bboxes = pickle.load(open(f'{self.directory}/bboxes.pickle', 'rb'))
             self.raw_image_url = f'{input_dir}/{self.experiment_id}/raw-image-{self.experiment_id}-{section}.jpg'
             self.raw_image = self.create_button(self.raw_image_url, "raw image", self.build_raw_image, True)
-            self.contours_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.png'
+            self.contours_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.pdf'
             self.contours = self.create_button(self.contours_url, "cell contours", self.build_contours, True)
             self.annotated_url = f'{input_dir}/{self.experiment_id}/annotated-{self.experiment_id}-{section}.jpg'
             self.annotated = self.create_button(self.annotated_url, "annotated image", self.build_annotated, False)
