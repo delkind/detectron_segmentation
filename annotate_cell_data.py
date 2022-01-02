@@ -118,13 +118,32 @@ def create_section_contours(section, experiment_id, directory, bboxes, path, bra
     # ax.add_patch(plt.Rectangle((0, 0), w, h, color=(0, 0, 0), fill=False))
 
     for color, contours in cell_contours:
-        cv2.fillPoly(mask, [(c // 2) - np.array([x, y]) for c in contours], color=(tuple(color)[::-1]) + (255,))
+        cv2.polylines(mask, [(c // 2) - np.array([x, y]) for c in contours], color=(tuple(color)[::-1]) + (255,),
+                      thickness=2, isClosed=True)
         # for poly in contours:
         #     ax.add_patch(plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
         #                              closed=True, fill=False, color=np.array(color) / 255))
 
     # plt.savefig(path, dpi=25)
     cv2.imwrite(path, mask)
+
+
+def create_section_contours_pdf(section, experiment_id, directory, bboxes, path, brain_seg_data):
+    thumb, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, False, scale=2)
+    cell_contours = get_contours(bboxes, directory, experiment_id, section, brain_seg_data)
+
+    fig, ax = plt.subplots(figsize=(brain_bbox.w // 100, brain_bbox.h // 100), dpi=25)
+    ax.set_xlim(0, brain_bbox.w)
+    ax.set_ylim(brain_bbox.h, 0)
+    ax.axis('off')
+
+    for color, contours in cell_contours:
+        for poly in contours:
+            ax.add_patch(plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
+                                     closed=True, fill=False, color=np.array(color) / 255))
+
+    plt.savefig(path, dpi=25)
+    plt.close()
 
 
 class ExperimentDataAnnotator(object):

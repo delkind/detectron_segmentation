@@ -12,7 +12,8 @@ import pandas as pd
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 import matplotlib.pyplot as plt
 
-from annotate_cell_data import create_section_image, get_brain_bbox_and_image, create_section_contours, get_contours
+from annotate_cell_data import create_section_image, get_brain_bbox_and_image, create_section_contours, get_contours, \
+    create_section_contours_pdf
 from explorer.explorer_utils import is_file_up_to_date, plot_section_violin_diagram, plot_section_histograms, \
     init_model, predict_crop
 from explorer.ui import ExperimentsSelector
@@ -28,7 +29,7 @@ class SectionHistogramPlotter(object):
             self.patches = self.create_button(patches_url, "patches", self.build_patches)
             heatmaps_url = f'{input_dir}/{self.experiment_id}/heatmaps-{self.experiment_id}.pdf'
             self.heatmaps = self.create_button(heatmaps_url, "heatmaps", self.build_heatmaps)
-            super().__init__((self.heatmaps, self.patches, ))
+            super().__init__((self.heatmaps, self.patches,))
 
         def build_patches(self):
             pass
@@ -70,6 +71,8 @@ class SectionHistogramPlotter(object):
             self.raw_image = self.create_button(self.raw_image_url, "raw image", self.build_raw_image, True)
             self.contours_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.png'
             self.contours = self.create_button(self.contours_url, "cell contours", self.build_contours, True)
+            self.contours_pdf_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.pdf'
+            self.contours_pdf = self.create_button(self.contours_pdf_url, "cell contours", self.build_contours_pdf, True)
             self.annotated_url = f'{input_dir}/{self.experiment_id}/annotated-{self.experiment_id}-{section}.jpg'
             self.annotated = self.create_button(self.annotated_url, "annotated image", self.build_annotated, False)
             self.y_input = widgets.IntText(value=0, description='Y')
@@ -77,7 +80,7 @@ class SectionHistogramPlotter(object):
             self.predict_button = widgets.Button(description='Predict crop', )
             self.predict_button.on_click(self.do_predict)
             self.cell_model = None
-            super().__init__((self.annotated, self.contours, self.raw_image, self.x_input, self.y_input,
+            super().__init__((self.annotated, self.contours, self.contours_pdf, self.raw_image, self.x_input, self.y_input,
                               self.predict_button,))
 
         def build_raw_image(self):
@@ -89,6 +92,10 @@ class SectionHistogramPlotter(object):
         def build_contours(self):
             create_section_contours(self.section, self.experiment_id, self.directory,
                                     self.bboxes, self.contours_url, self.seg_data)
+
+        def build_contours_pdf(self):
+            create_section_contours_pdf(self.section, self.experiment_id, self.directory,
+                                        self.bboxes, self.contours_pdf_url, self.seg_data)
 
         def build_annotated(self):
             thumb = create_section_image(self.section, self.experiment_id, self.directory, self.full_data,
