@@ -1,6 +1,8 @@
 import os
 import pickle
 
+from build_cell_grid import build_cell_grid
+
 os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = str(pow(2, 140))
 
 import PIL.Image as Image
@@ -14,22 +16,57 @@ import matplotlib.pyplot as plt
 
 from annotate_cell_data import create_section_image, get_brain_bbox_and_image, create_section_contours, get_contours, \
     create_section_contours_pdf
-from explorer.explorer_utils import is_file_up_to_date, plot_section_violin_diagram, plot_section_histograms, \
-    init_model, predict_crop
+from explorer.explorer_utils import is_file_up_to_date, init_model, predict_crop
 from explorer.ui import ExperimentsSelector
 from localize_brain import detect_brain
 
 
+def create_button(base_time, url, display_name, builder, download):
+    def on_click(b):
+        if not is_file_up_to_date(url, base_time):
+            b.disabled = True
+            b.description = f"Building {display_name}..."
+            builder()
+            b.description = f"{'Open' if not download else 'Download'} {display_name}"
+            b.disabled = False
+
+        if download:
+            display(HTML(f'<a href="{url}" download id="download" hidden></a>'))
+            display(Javascript('''
+                document.getElementById('download').click();
+                document.getElementById('download').remove();
+            '''))
+        else:
+            display(Javascript(f"window.open('{url}');"))
+
+    if os.path.isfile(url):
+        button = widgets.Button(description=f"{'Open' if not download else 'Download'} {display_name}")
+    else:
+        button = widgets.Button(description=f"Build {display_name}")
+
+    button.on_click(on_click)
+    button.layout.width = 'auto'
+    return button
+
+
 class SectionHistogramPlotter(object):
     class HeatmapAndPatchButtons(widgets.HBox):
-        def __init__(self, experiment_id, base_time, input_dir):
+        def __init__(self, experiment_id, base_time, input_dir, seg_data_dir):
+            self.seg_data_dir = seg_data_dir
             self.experiment_id = experiment_id
             self.base_time = base_time
+            self.input_dir = input_dir
             patches_url = f'{input_dir}/{self.experiment_id}/patches-{self.experiment_id}.pdf'
-            self.patches = self.create_button(patches_url, "patches", self.build_patches)
+            self.patches = create_button(base_time, patches_url, "patches", self.build_patches, False)
             heatmaps_url = f'{input_dir}/{self.experiment_id}/heatmaps-{self.experiment_id}.pdf'
-            self.heatmaps = self.create_button(heatmaps_url, "heatmaps", self.build_heatmaps)
-            super().__init__((self.heatmaps, self.patches,))
+            self.heatmaps = create_button(base_time, heatmaps_url, "heatmaps", self.build_heatmaps, False)
+            cell_patches_url = f'{input_dir}/{self.experiment_id}/cell-patches-{self.experiment_id}.pdf'
+            self.cell_patches = create_button(base_time, cell_patches_url, "cell patches",
+                                              lambda: self.build_cell_patches(cell_patches_url), False)
+            cell_patches_png_url = f'{input_dir}/{self.experiment_id}/cell-patches-{self.experiment_id}.png'
+            self.cell_patches_png = create_button(base_time, cell_patches_png_url, "cell patches",
+                                                  lambda: self.build_cell_patches(cell_patches_png_url), False)
+            super().__init__((self.cell_patches, self.cell_patches_png))
 
         def build_patches(self):
             pass
@@ -37,25 +74,8 @@ class SectionHistogramPlotter(object):
         def build_heatmaps(self):
             pass
 
-        def create_button(self, url, display_name, builder):
-            def on_click(b):
-                if not is_file_up_to_date(url, self.base_time):
-                    b.disabled = True
-                    b.description = f"Building {display_name}..."
-                    builder()
-                    self.description = f"Open {display_name}"
-                    self.disabled = False
-
-                display(Javascript(f"window.open('{url}');"))
-
-            if os.path.isfile(url):
-                button = widgets.Button(description=f"Open {display_name}")
-            else:
-                button = widgets.Button(description=f"Build {display_name}")
-
-            button.on_click(on_click)
-            button.layout.width = 'auto'
-            return button
+        def build_cell_patches(self, url):
+            build_cell_grid(self.experiment_id, self.input_dir, self.seg_data_dir, url, False)
 
     class AnnotationsButtonBar(widgets.HBox):
         def __init__(self, experiment_id, full_data, section, base_time, input_dir, output, seg_data_dir):
@@ -68,13 +88,13 @@ class SectionHistogramPlotter(object):
             self.directory = f'{input_dir}/{self.experiment_id}'
             self.bboxes = pickle.load(open(f'{self.directory}/bboxes.pickle', 'rb'))
             self.raw_image_url = f'{input_dir}/{self.experiment_id}/raw-image-{self.experiment_id}-{section}.jpg'
-            self.raw_image = self.create_button(self.raw_image_url, "raw image", self.build_raw_image, True)
+            self.raw_image = create_button(self.base_time, self.raw_image_url, "raw image", self.build_raw_image, True)
             self.contours_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.png'
-            self.contours = self.create_button(self.contours_url, "cell contours", self.build_contours, True)
+            self.contours = create_button(self.base_time, self.contours_url, "cell contours", self.build_contours, True)
             self.contours_pdf_url = f'{input_dir}/{self.experiment_id}/cell-contours-{self.experiment_id}-{section}.pdf'
-            self.contours_pdf = self.create_button(self.contours_pdf_url, "cell contours", self.build_contours_pdf, True)
+            self.contours_pdf = create_button(self.base_time, self.contours_pdf_url, "cell contours", self.build_contours_pdf, True)
             self.annotated_url = f'{input_dir}/{self.experiment_id}/annotated-{self.experiment_id}-{section}.jpg'
-            self.annotated = self.create_button(self.annotated_url, "annotated image", self.build_annotated, False)
+            self.annotated = create_button(self.base_time, self.annotated_url, "annotated image", self.build_annotated, False)
             self.y_input = widgets.IntText(value=0, description='Y')
             self.x_input = widgets.IntText(value=0, description='X')
             self.predict_button = widgets.Button(description='Predict crop', )
@@ -102,33 +122,6 @@ class SectionHistogramPlotter(object):
                                          self.bboxes, self.seg_data)
             _, r, _ = detect_brain(cv2.cvtColor(thumb, cv2.COLOR_BGR2GRAY))
             cv2.imwrite(self.annotated_url, thumb[r.y: r.y + r.h, r.x: r.x + r.w])
-
-        def create_button(self, url, display_name, builder, download):
-            def on_click(b):
-                if not is_file_up_to_date(url, self.base_time):
-                    b.disabled = True
-                    b.description = f"Building {display_name}..."
-                    builder()
-                    b.description = f"{'Open' if not download else 'Download'} {display_name}"
-                    b.disabled = False
-
-                if download:
-                    display(HTML(f'<a href="{url}" download id="download" hidden></a>'))
-                    display(Javascript('''
-                        document.getElementById('download').click();
-                        document.getElementById('download').remove();
-                    '''))
-                else:
-                    display(Javascript(f"window.open('{url}');"))
-
-            if os.path.isfile(url):
-                button = widgets.Button(description=f"{'Open' if not download else 'Download'} {display_name}")
-            else:
-                button = widgets.Button(description=f"Build {display_name}")
-
-            button.on_click(on_click)
-            button.layout.width = 'auto'
-            return button
 
         def do_predict(self, b):
             if self.cell_model is None:
@@ -199,12 +192,13 @@ class SectionHistogramPlotter(object):
         else:
             display(widgets.Label(f"Experiment {self.experiment_id}, totals"))
             display(self.output)
-            display(widgets.HBox((self.HeatmapAndPatchButtons(experiment_id, base_time, input_dir),)))
+            display(widgets.HBox((self.HeatmapAndPatchButtons(experiment_id, base_time, input_dir, seg_data_dir),)))
             thumb = None
 
         with self.output:
             # plot_section_violin_diagram(self.data, structure_tree, thumb)
-            plt.imshow(thumb)
+            if thumb is not None:
+                plt.imshow(thumb)
             plt.axis('off')
             plt.show()
     #
@@ -249,6 +243,14 @@ class BrainDetailsSelector(widgets.VBox):
         self.refresh()
         self.on_select_experiment([])
 
+    def create_grid(self):
+        experiment_ids = list(set(self.experiments_selector.get_selection()))
+        experiment_id = experiment_ids[0]
+        build_cell_grid.build_cell_grid(experiment_id,
+                                        self.input_dir,
+                                        self.seg_data_dir,
+                                        f'{self.input_dir}/{experiment_id}/cell-grid.pdf')
+
     def refresh(self):
         self.experiments_selector.set_available_brains(set([int(e) for e in os.listdir(self.input_dir) if e.isdigit()]))
         experiment_ids = list(set(self.experiments_selector.get_selection()))
@@ -265,7 +267,7 @@ class BrainDetailsSelector(widgets.VBox):
             with open(f'{directory}/bboxes.pickle', "rb") as f:
                 bboxes = pickle.load(f)
             bboxes = {k: v for k, v in bboxes.items() if v}
-            self.section_combo.options = ['all', 'totals'] + list(str(i) for i in bboxes.keys())
+            self.section_combo.options = ['all'] + list(str(i) for i in bboxes.keys())
             self.section_combo.value = self.section_combo.options[0]
             self.section_combo.disabled = False
 

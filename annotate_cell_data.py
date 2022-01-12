@@ -129,21 +129,27 @@ def create_section_contours(section, experiment_id, directory, bboxes, path, bra
 
 
 def create_section_contours_pdf(section, experiment_id, directory, bboxes, path, brain_seg_data):
-    thumb, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, False, scale=2)
-    cell_contours = get_contours(bboxes, directory, experiment_id, section, brain_seg_data)
-
+    brain_bbox, patches = produce_patch_collection(bboxes, brain_seg_data, directory, experiment_id, section)
     fig, ax = plt.subplots(figsize=(brain_bbox.w // 100, brain_bbox.h // 100), dpi=25)
+    plot_patch_collection(ax, brain_bbox, patches)
+    plt.savefig(path, dpi=25)
+    plt.close()
+
+
+def produce_patch_collection(bboxes, brain_seg_data, directory, experiment_id, section):
+    _, brain_bbox = get_brain_bbox_and_image(bboxes, directory, experiment_id, section, False, scale=2)
+    cell_contours = get_contours(bboxes, directory, experiment_id, section, brain_seg_data)
+    patches = [plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
+                           closed=True, fill=False, color=np.array(color) / 255) for color, contours in cell_contours
+               for poly in contours]
+    return brain_bbox, PatchCollection(patches, match_original=True)
+
+
+def plot_patch_collection(ax, brain_bbox, patches):
     ax.set_xlim(0, brain_bbox.w)
     ax.set_ylim(brain_bbox.h, 0)
     ax.axis('off')
-
-    for color, contours in cell_contours:
-        for poly in contours:
-            ax.add_patch(plt.Polygon(poly - np.array([brain_bbox.x, brain_bbox.y]),
-                                     closed=True, fill=False, color=np.array(color) / 255))
-
-    plt.savefig(path, dpi=25)
-    plt.close()
+    ax.add_collection(patches)
 
 
 class ExperimentDataAnnotator(object):
