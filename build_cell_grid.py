@@ -14,7 +14,7 @@ def build_section(params):
     return produce_patch_collection(bboxes, seg_data, experiment_dir, experiment, section)
 
 
-def build_cell_grid(experiment, data_dir, seg_data_dir, output_path, use_tqdm=False):
+def build_cell_grid(experiment, data_dir, seg_data_dir, output_path, use_tqdm=True):
     experiment_dir = f"{data_dir}/{experiment}"
     bboxes = pickle.load(open(f"{experiment_dir}/bboxes.pickle", "rb"))
     seg_data = np.load(f'{seg_data_dir}/{experiment}/{experiment}-sections.npz')['arr_0']
@@ -50,6 +50,5 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path, use_tqdm=Fa
     plt.close()
 
 
-# if __name__ == '__main__':
-#     print(sys.argv)
-#     build_cell_grid(*(sys.argv[1:]))
+if __name__ == '__main__':
+    build_cell_grid(*(sys.argv[1:]))
