@@ -151,8 +151,7 @@ def calculate_global_parameters(cells, globs_per_section, seg):
         if not section_pairs:
             section_pairs = [tuple(region_data.keys()) * 2]
 
-        cells_region = cells[cells.structure_id == region]
-        cells_region = cells_region[(cells_region.diameter > 2) & (cells_region.diameter < 12)]
+        cells_region = cells[(cells.structure_id == region) & (cells.diameter > 2) & (cells.diameter < 12)]
 
         diameter = {q: cells_region.diameter.quantile(q) for q in quantiles}
 
