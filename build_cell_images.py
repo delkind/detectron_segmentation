@@ -34,7 +34,7 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
         brain_bbox, patches = result
         plot_patch_collection(ax.flatten()[i], brain_bbox, patches)
         print("Saving figure...")
-        fig.savefig(str(i) + output_path, dpi=25)
+        fig.savefig(output_path[:output_path.rfind('.')] + f'-{i}' + output_path[output_path.rfind('.'):], dpi=25)
         plt.close()
 
 
