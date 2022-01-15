@@ -35,11 +35,11 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
     brain_bbox = Rect(0, 0, max_w, max_h)
 
     for i, result in enumerate(tqdm(patches, "Plotting sections", total=len(patches))):
-        fig, ax = plt.subplots(figsize=(3 * FIG_SCALE, 2 * FIG_SCALE), dpi=25)
+        fig, ax = plt.subplots(figsize=(3 * FIG_SCALE, 2 * FIG_SCALE), dpi=125)
         _, patches = result
         plot_patch_collection(ax, brain_bbox, patches)
         print("Saving figure...")
-        fig.savefig(output_path[:output_path.rfind('.')] + f'-{i}' + output_path[output_path.rfind('.'):], dpi=25)
+        fig.savefig(output_path[:output_path.rfind('.')] + f'-{i}' + output_path[output_path.rfind('.'):], dpi=125)
         plt.close()
 
 

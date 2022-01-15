@@ -32,7 +32,7 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
                        bboxes,
                        seg_data))
 
-    fig, ax = plt.subplots(nrows=NROWS, ncols=NCOLS, figsize=(NCOLS * 3 * FIG_SCALE, NROWS * 2 * FIG_SCALE), dpi=25)
+    fig, ax = plt.subplots(nrows=NROWS, ncols=NCOLS, figsize=(NCOLS * 3 * FIG_SCALE, NROWS * 2 * FIG_SCALE), dpi=125)
     for a in ax.flatten():
         a.axis('off')
 
@@ -49,7 +49,7 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
 
     print("Saving figure...")
 
-    fig.savefig(output_path, dpi=25)
+    fig.savefig(output_path, dpi=125)
     plt.close()
 
 
