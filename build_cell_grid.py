@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 
 from annotate_cell_data import produce_patch_collection, plot_patch_collection
+from rect import Rect
 
 NROWS = 10
 NCOLS = 7
@@ -38,8 +39,12 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
     pool = Pool(cpu_count() // 2)
     patches = list(tqdm(pool.imap(build_section, params), "Building sections", total=len(params)))
 
+    max_w = max(map(lambda t: t[0].w, patches))
+    max_h = max(map(lambda t: t[0].h, patches))
+
+    brain_bbox = Rect(0, 0, max_w, max_h)
     for i, result in enumerate(tqdm(patches, "Plotting sections", total=len(patches))):
-        brain_bbox, patches = result
+        _, patches = result
         plot_patch_collection(ax.flatten()[i], brain_bbox, patches)
 
     print("Saving figure...")

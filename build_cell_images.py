@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from annotate_cell_data import plot_patch_collection
 from build_cell_grid import build_section
+from rect import Rect
 
 FIG_SCALE = 20
 
@@ -28,9 +29,14 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
     pool = Pool(cpu_count() // 2)
     patches = list(tqdm(pool.imap(build_section, params), "Building sections", total=len(params)))
 
+    max_w = max(map(lambda t: t[0].w, patches))
+    max_h = max(map(lambda t: t[0].h, patches))
+
+    brain_bbox = Rect(0, 0, max_w, max_h)
+
     for i, result in enumerate(tqdm(patches, "Plotting sections", total=len(patches))):
         fig, ax = plt.subplots(figsize=(3 * FIG_SCALE, 2 * FIG_SCALE), dpi=25)
-        brain_bbox, patches = result
+        _, patches = result
         plot_patch_collection(ax, brain_bbox, patches)
         print("Saving figure...")
         fig.savefig(output_path[:output_path.rfind('.')] + f'-{i}' + output_path[output_path.rfind('.'):], dpi=25)
