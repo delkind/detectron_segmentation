@@ -303,9 +303,12 @@ class RawDataResultsSelector(widgets.VBox):
         self.structure_tree = self.mcc.get_structure_tree()
         self.aggregates = get_struct_aggregates(set(self.get_column_options(self.data_template['structure_id'])))
 
-        self.tree = StructureTree(ids=[s['acronym'] for s in self.structure_tree.get_structures_by_id(
-            list(self.aggregates.keys()))],
-                                  multiple_selection=True)
+        self.tree = StructureTree([s['acronym'] for s in self.structure_tree.get_structures_by_id(
+            list(self.aggregates.keys()))], multiple_selection=False)
+        self.tree.layout.width = "100%"
+        self.tree.layout.max_height = "240px"
+        self.tree.layout.overflow_y = 'scroll'
+
         self.parameter_selector = widgets.Dropdown(description="Parameter", options=['coverage', 'area', 'perimeter'])
 
         self.change_handler = None
