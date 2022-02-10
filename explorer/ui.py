@@ -289,7 +289,7 @@ class SectionDataResultsSelector(widgets.HBox):
         return ['.'.join(str(p) for p in (path[:-1] + (b,))) for b in path[-1]]
 
     def get_selection_path(self):
-        return self.tree.get_selection(), [b for b in self.bin_selector.value]
+        return self.tree.get_selection(), self.param_selector.value, [b for b in self.bin_selector.value]
 
 
 class RawDataResultsSelector(widgets.VBox):
@@ -303,13 +303,13 @@ class RawDataResultsSelector(widgets.VBox):
         self.structure_tree = self.mcc.get_structure_tree()
         self.aggregates = get_struct_aggregates(set(self.get_column_options(self.data_template['structure_id'])))
 
-        self.structure_selector = StructureTree(ids=[s['acronym'] for s in self.structure_tree.get_structures_by_id(
+        self.tree = StructureTree(ids=[s['acronym'] for s in self.structure_tree.get_structures_by_id(
             list(self.aggregates.keys()))],
-                                                multiple_selection=True)
+                                  multiple_selection=True)
         self.parameter_selector = widgets.Dropdown(description="Parameter", options=['coverage', 'area', 'perimeter'])
 
         self.change_handler = None
-        super().__init__((widgets.HBox([self.structure_selector, self.parameter_selector]), self.messages))
+        super().__init__((widgets.HBox([self.tree, self.parameter_selector]), self.messages))
 
     def get_available_brains(self):
         return self.available_brains
@@ -323,7 +323,7 @@ class RawDataResultsSelector(widgets.VBox):
         return sorted(df.unique().tolist())
 
     def get_selected_structs(self):
-        selected_acronyms = [n.struct_id for n in self.structure_selector.selected_nodes]
+        selected_acronyms = [self.tree.get_selection()]
         id_sets = [self.aggregates[self.structure_tree.get_id_acronym_map()[s]] for s in selected_acronyms]
         ids = set.union(*id_sets)
         return [acronyms[i] for i in ids]
@@ -338,12 +338,15 @@ class RawDataResultsSelector(widgets.VBox):
         return np.concatenate([self.process_data_frame(self.data_frames[e], structs) for e in relevant_experiments])
 
     def get_selection_label(self):
-        label = '.'.join([n.struct_id for n in self.structure_selector.selected_nodes])
-        if label == '':
-            label = '<any>'
-        label = f'{label}.{self.parameter_selector.value}'
+        path = self.get_selection_path()
 
-        return label
+        if path is None:
+            return None
+
+        return '.'.join(str(p) for p in path)
+
+    def get_selection_path(self):
+        return self.tree.get_selection(), self.parameter_selector.value
 
     def on_selection_change(self, handler):
         self.change_handler = handler
