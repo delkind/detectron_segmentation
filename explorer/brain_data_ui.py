@@ -10,7 +10,7 @@ import scipy.stats as stats
 import seaborn as sns
 from IPython.display import display, Markdown, HTML
 
-from explorer.explorer_utils import hist, retrieve_nested_path
+from explorer.explorer_utils import hist, retrieve_nested_path, scatter
 from explorer.ui import ExperimentsSelector, ResultsSelector
 from figures.util import get_subplots, produce_figure
 
@@ -106,6 +106,8 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         self.bins = widgets.IntSlider(min=10, max=100, value=50, description='Bins: ')
         self.plot_hist_button = widgets.Button(description='Plot histogram')
         self.plot_hist_button.on_click(lambda b: self.plot_data(self.do_histogram_plot))
+        self.plot_scatter_button = widgets.Button(description='Plot scatter')
+        self.plot_scatter_button.on_click(lambda b: self.plot_data(self.do_scatter_plot))
         self.plot_violin_button = widgets.Button(description='Plot violin')
         self.plot_violin_button.on_click(lambda b: self.plot_data(self.do_violin_plot))
         self.ttest_button = widgets.Button(description='T-Test')
@@ -127,7 +129,8 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             self.data_selector,
             self.messages,
             widgets.HBox((self.show_median, self.show_steps)),
-            widgets.HBox((self.bins, self.plot_hist_button, self.plot_violin_button, self.ttest_button,
+            widgets.HBox((self.bins, self.plot_hist_button, self.plot_scatter_button, self.plot_violin_button,
+                          self.ttest_button,
                           self.kstest_button,
                           self.ranksum_button, self.median_button)),
             self.output))
@@ -180,6 +183,10 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         for l, d in values.items():
             hist(ax, d, bins=self.bins.value, raw_hist=self.show_steps.value, median=self.show_median.value, label=l)
         ax.legend()
+
+    def do_scatter_plot(self, values, ax):
+        (xl, x), (yl, y) = list(values.items())[:2]
+        scatter(ax, x, y, xl, yl)
 
     @staticmethod
     def do_violin_plot(values, ax):

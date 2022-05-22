@@ -41,6 +41,12 @@ def hist(ax, d, bins, raw_hist=False, median=False, **kwargs):
         ax.hist([], bins=bins, **kwargs)
 
 
+def scatter(ax, x, y, xlabel, ylabel, show_identity=False, **kwargs):
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.scatter(x, y, **kwargs)
+
+
 def violinplot(ax, structure_data, col):
     def set_axis_style(ax, labels, xlabel):
         ax.get_xaxis().set_tick_params(direction='out')
