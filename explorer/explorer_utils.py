@@ -41,10 +41,24 @@ def hist(ax, d, bins, raw_hist=False, median=False, **kwargs):
         ax.hist([], bins=bins, **kwargs)
 
 
-def scatter(ax, x, y, xlabel, ylabel, show_identity=False, **kwargs):
+def scatter(ax, x, y, xlabel, ylabel, show_identity=False, margins=None, **kwargs):
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.scatter(x, y, **kwargs)
+    if show_identity or margins is not None:
+        lims = (min(ax.get_xlim()[0], ax.get_ylim()[0]), max(ax.get_xlim()[1], ax.get_ylim()[1]))
+        ax.set_xlim(lims)
+        ax.set_ylim(lims)
+        xpoints = ypoints = ax.get_xlim()
+        if show_identity:
+            ax.plot(xpoints, ypoints, linestyle='-.', color='r', lw=1, scalex=False, scaley=False)
+
+        if margins is not None:
+            ax.plot(xpoints, np.array(ypoints) - abs(ypoints[0] - ypoints[1]) * margins, linestyle='-.', color='r', lw=1,
+                    scalex=False, scaley=False)
+            ax.plot(xpoints, np.array(ypoints) + abs(ypoints[0] - ypoints[1]) * margins, linestyle='-.', color='r', lw=1,
+                    scalex=False, scaley=False)
+
 
 
 def violinplot(ax, structure_data, col):

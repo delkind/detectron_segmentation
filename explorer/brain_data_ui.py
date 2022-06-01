@@ -101,9 +101,12 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         # self.data_selector = DataSelector(data_dir, ResultsSelector(pickle.load(open(f'{data_dir}/../stats.pickle',
         #                                                                              'rb'))))
         self.data_selector = DataSelector(data_dir, raw_data_selector)
+        self.show_identity = widgets.Checkbox(value=True, description='Show x=y', indent=True)
         self.show_median = widgets.Checkbox(value=True, description='Show median', indent=True)
         self.show_steps = widgets.Checkbox(value=True, description='Show raw histogram (steps)', indent=True)
         self.bins = widgets.IntSlider(min=10, max=100, value=50, description='Bins: ')
+        self.show_margins = widgets.Checkbox(value=True, description='Show margins', indent=True)
+        self.margins = widgets.IntSlider(min=10, max=100, value=50, description='Margins: ')
         self.plot_hist_button = widgets.Button(description='Plot histogram')
         self.plot_hist_button.on_click(lambda b: self.plot_data(self.do_histogram_plot))
         self.plot_scatter_button = widgets.Button(description='Plot scatter')
@@ -128,11 +131,9 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
             header,
             self.data_selector,
             self.messages,
-            widgets.HBox((self.show_median, self.show_steps)),
-            widgets.HBox((self.bins, self.plot_hist_button, self.plot_scatter_button, self.plot_violin_button,
-                          self.ttest_button,
-                          self.kstest_button,
-                          self.ranksum_button, self.median_button)),
+            widgets.HBox((self.plot_scatter_button, self.show_identity, self.show_margins, self.margins)),
+            widgets.HBox((self.plot_hist_button, self.plot_violin_button, self.show_median, self.show_steps, self.bins)),
+            widgets.HBox((self.kstest_button, self.ranksum_button, self.median_button)),
             self.output))
         self.histograms = dict()
 
@@ -186,7 +187,7 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
 
     def do_scatter_plot(self, values, ax):
         (xl, x), (yl, y) = list(values.items())[:2]
-        scatter(ax, x, y, xl, yl)
+        scatter(ax, x, y, xl, yl, self.show_identity, self.margins.value / 100 if self.show_margins.value else None)
 
     @staticmethod
     def do_violin_plot(values, ax):
