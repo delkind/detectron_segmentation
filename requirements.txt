@@ -8,7 +8,7 @@ ipython==7.16.1
 ipytree==0.1.8
 ipywidgets==7.6.2
 matplotlib==3.3.0
-numpy==1.18.1
+numpy==1.22.0
 opencv-python==4.2.0.32
 pandas==0.25.3
 pyarrow==2.0.0
