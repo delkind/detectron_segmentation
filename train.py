@@ -171,13 +171,21 @@ class Trainer(DefaultTrainer):
         return build_detection_train_loader(cfg, mapper=MyDatasetMapper(cfg, True))
 
 
-def get_balloon_dicts(img_dir, json_file):
+def get_balloon_dicts(img_dir, json_file, train=False):
     json_file = os.path.join(img_dir, json_file)
     with open(json_file) as f:
         imgs_anns = json.load(f)
 
     dataset_dicts = []
-    for idx, v in enumerate(imgs_anns['_via_img_metadata'].values()):
+
+    images = list(imgs_anns['_via_img_metadata'].values())
+
+    if train and all(map(lambda e: 'score' in e, images)):
+        images = sorted(images, key=lambda e: e['score'])
+        scores = np.array([i['score'] for i in images])
+        images = images + images[:int((scores < 0.9).sum())]
+
+    for idx, v in enumerate(images):
         record = {}
 
         filename = os.path.join(img_dir, v["filename"])
@@ -216,12 +224,10 @@ def main(image_dir, project, crop_size, batch_size, iterations, validation_split
     if tb:
         print(f'Tensorboard URL: {launch_tb(output_dir, tb_port)}')
 
-    DatasetCatalog.register("train", lambda: get_balloon_dicts(image_dir, project))
+    DatasetCatalog.register("train", lambda: get_balloon_dicts(image_dir, project, True))
     MetadataCatalog.get("train").set(thing_classes=["balloon"])
-    DatasetCatalog.register("val", lambda: get_balloon_dicts(image_dir, project))
+    DatasetCatalog.register("val", lambda: get_balloon_dicts(image_dir, project, False))
     MetadataCatalog.get("val").set(thing_classes=["balloon"])
-    cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
     cfg.DATASETS.TRAIN = ("train", )
