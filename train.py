@@ -183,7 +183,7 @@ def get_balloon_dicts(img_dir, json_file, train=False):
     if train and all(map(lambda e: 'score' in e, images)):
         images = sorted(images, key=lambda e: e['score'])
         scores = np.array([i['score'] for i in images])
-        images = images + images[:int((scores < 0.9).sum())]
+        images = images[:int((scores < 0.9).sum())]
 
     for idx, v in enumerate(images):
         record = {}
