@@ -180,12 +180,12 @@ def get_balloon_dicts(img_dir, json_file, train=False):
 
     images = list(imgs_anns['_via_img_metadata'].values())
 
-    if train and all(map(lambda e: 'score' in e, images)):
-        images = sorted(images, key=lambda e: e['score'])
-        scores = np.array([i['score'] for i in images])
-        images = images[:int((scores < 0.9).sum())]
+    # if train and all(map(lambda e: 'score' in e, images)):
+    #     images = sorted(images, key=lambda e: e['score'])
+    #     scores = np.array([i['score'] for i in images])
+    #     images = images[:int((scores < 0.9).sum())]
 
-    for idx, v in enumerate(images):
+    for idx, v in enumerate(images[:40]):
         record = {}
 
         filename = os.path.join(img_dir, v["filename"])
