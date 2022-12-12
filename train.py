@@ -185,7 +185,7 @@ def get_balloon_dicts(img_dir, json_file, train=False):
     #     scores = np.array([i['score'] for i in images])
     #     images = images[:int((scores < 0.9).sum())]
 
-    for idx, v in enumerate(images[:40]):
+    for idx, v in enumerate(images):
         record = {}
 
         filename = os.path.join(img_dir, v["filename"])
