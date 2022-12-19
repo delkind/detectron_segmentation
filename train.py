@@ -253,7 +253,10 @@ def main(image_dir, project, crop_size, batch_size, iterations, validation_split
     cfg.MODEL.RPN.PRE_NMS_TOPK_TRAIN = 48000
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     trainer = Trainer(cfg)
-    trainer.resume_or_load(resume=False)
+    if resume:
+        trainer.resume_or_load(resume=True)
+    else:
+        trainer.resume_or_load(resume=False)
     trainer.train()
 
 
