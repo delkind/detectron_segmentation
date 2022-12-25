@@ -47,7 +47,7 @@ class MyDatasetMapper:
 
         self.tfm_gens = self.tfm_gens + [T.RandomBrightness(0.5, 2),
                                          T.RandomContrast(0.5, 2),
-                                         T.RandomRotation([30, 180])
+                                         # T.RandomRotation([30, 180])
                                          ]
 
         # fmt: off
@@ -250,7 +250,7 @@ def main(image_dir, project, crop_size, batch_size, iterations, validation_split
     cfg.OUTPUT_DIR = output_dir
     cfg.INPUT.CROP.SIZE = crop_size
     cfg.DATASETS.PRECOMPUTED_PROPOSAL_TOPK_TRAIN = 8000
-    # cfg.MODEL.RPN.PRE_NMS_TOPK_TRAIN = 48000
+    cfg.MODEL.RPN.PRE_NMS_TOPK_TRAIN = 48000
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     trainer = Trainer(cfg)
     if resume:
