@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import re
 import cv2
+from tqdm import tqdm
 
 from experiment_images_downloader import ExperimentImagesDownloader
 
@@ -71,7 +72,7 @@ def main(path, output_dir, section_data_dir):
         available = sorted(list(set(section_numbers).intersection(set(atlas_numbers))))
         atlas_shape = skimage.io.imread(f'{path}/{b}/{atlas_dirs[0]}/{atlas_items[available[0]]}').shape
         atlas_array = [np.zeros(atlas_shape, dtype=np.uint16)]
-        for i in range(available[-1]):
+        for i in tqdm(range(available[-1]), "Processing atlas..."):
             if i in atlas_items:
                 atlas = skimage.io.imread(f'{path}/{b}/{atlas_dirs[0]}/{atlas_items[i]}')
             else:
@@ -89,7 +90,7 @@ def main(path, output_dir, section_data_dir):
         with open(f'{output_dir}/{dir_name}/bboxes.pickle', 'wb') as f:
             pickle.dump(bboxes, f)
 
-        for i, bbox in bboxes.items():
+        for i, bbox in tqdm(bboxes.items(), "Processing images..."):
             image = skimage.io.imread(f'{path}/{b}/{sections[i]}')
             image = (image / 255).astype(np.uint8)
 
