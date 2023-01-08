@@ -58,9 +58,7 @@ def main(path, output_dir, section_data_dir):
     acronyms = mcc.get_structure_tree().get_id_acronym_map()
     acronyms = {k.lower(): v for k, v in acronyms.items()}
     allen_ids = {iid: acronyms[acro.lower()] for iid, acro in tree.acronym.to_dict().items()}
-    tree['allen_ids'] = allen_ids
-    ids_map = tree.allen_ids.to_dict()
-    id_mapper = np.vectorize(lambda p: ids_map[int(p)] if p != 0 else 0)
+    id_mapper = np.vectorize(lambda p: allen_ids[p] if p != 0 else 0)
 
     for b in brains:
         print(f"Processing {b}...")
