@@ -75,6 +75,8 @@ def main(path, output_dir, section_data_dir):
         for i in tqdm(range(available[-1]), "Processing atlas..."):
             if i in atlas_items:
                 atlas = skimage.io.imread(f'{path}/{b}/{atlas_dirs[0]}/{atlas_items[i]}')
+                if atlas.sum() == 0:
+                    print(f"Invalid atlas file: {dir_name}-{i}")
             else:
                 atlas = np.zeros(atlas_shape, dtype=np.uint16)
 
