@@ -14,6 +14,8 @@ import cv2
 from tqdm import tqdm
 
 from experiment_images_downloader import ExperimentImagesDownloader
+from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+
 
 TILE_SIZE = 320
 
@@ -51,8 +53,14 @@ def main(path, output_dir, section_data_dir):
     print(f"Processing {path}...")
     tree = pd.read_csv(f"{path}/141-2-001_Atlas_Regions.csv").set_index(['id'])
 
-    regs = {r: get_all_children(tree, tree[tree.acronym == r].index[0]) for r in ['HIP', 'HB', 'CB']}
     brains = [d for d in os.listdir(path) if os.path.isdir(f"{path}/{d}/")]
+    mcc = MouseConnectivityCache(manifest_file=f'/tmp/mouse_connectivity_manifest.json')
+    acronyms = mcc.get_structure_tree().get_id_acronym_map()
+    acronyms = {k.lower(): v for k, v in acronyms.items()}
+    allen_ids = {iid: acronyms[acro.lower()] for iid, acro in tree.acronym.to_dict().items()}
+    tree['allen_ids'] = allen_ids
+    ids_map = tree.allen_ids.to_dict()
+    id_mapper = np.vectorize(lambda p: ids_map[int(p)] if p != 0 else 0)
 
     for b in brains:
         print(f"Processing {b}...")
@@ -71,14 +79,17 @@ def main(path, output_dir, section_data_dir):
         atlas_items = dict(zip(atlas_numbers, atlas_items))
         available = sorted(list(set(section_numbers).intersection(set(atlas_numbers))))
         atlas_shape = skimage.io.imread(f'{path}/{b}/{atlas_dirs[0]}/{atlas_items[available[0]]}').shape
-        atlas_array = [np.zeros(atlas_shape, dtype=np.uint16)]
+        atlas_array = [np.zeros(atlas_shape, dtype=np.int)]
         for i in tqdm(range(available[-1]), "Processing atlas..."):
             if i in atlas_items:
-                atlas = skimage.io.imread(f'{path}/{b}/{atlas_dirs[0]}/{atlas_items[i]}')
-                if atlas.sum() == 0:
+                raw_image = skimage.io.imread(f'{path}/{b}/{atlas_dirs[0]}/{atlas_items[i]}')
+                if raw_image.sum() == 0:
                     print(f"Invalid atlas file: {dir_name}-{i}")
+                    atlas = np.zeros(atlas_shape, dtype=int)
+                else:
+                    atlas = id_mapper(raw_image.astype(int))
             else:
-                atlas = np.zeros(atlas_shape, dtype=np.uint16)
+                atlas = np.zeros(atlas_shape, dtype=int)
 
             atlas_array += [atlas]
 
