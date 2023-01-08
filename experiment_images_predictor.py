@@ -135,12 +135,13 @@ class ExperimentImagesPredictor(DirWatcher):
             w = w * ratios[0]
             y = y * ratios[1]
             h = h * ratios[1]
-            cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.npz'
+            cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png'
             if not os.path.isfile(cellmask_fname):
                 image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
                                    cv2.IMREAD_GRAYSCALE)
-                polys = self.predict_cells(image, mask, x, y, ratios)
-                np.savez(cellmask_fname, polys)
+                img_mask = self.predict_cells(image, mask, x, y, ratios)
+                cv2.imwrite(cellmask_fname,
+                            np.stack([np.zeros_like(img_mask), img_mask, np.zeros_like(img_mask)], axis=2))
             else:
                 self.logger.info(f"{cellmask_fname} already exists, skipping segmentation...")
 
@@ -161,8 +162,7 @@ class ExperimentImagesPredictor(DirWatcher):
                         np.logical_or(cell_mask[coords[0]: coords[0] + self.crop_size,
                                       coords[1]: coords[1] + self.crop_size], mask)
 
-        polys = perform_watershed(cell_mask)
-        return mask
+        return cell_mask
 
 
 class ExperimentPredictorTaskManager(ExperimentProcessTaskManager):
