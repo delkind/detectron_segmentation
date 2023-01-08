@@ -101,11 +101,14 @@ def main(path, output_dir, section_data_dir):
         with open(f'{output_dir}/{dir_name}/bboxes.pickle', 'wb') as f:
             pickle.dump(bboxes, f)
 
+        ratios = dict()
+
         for i, bbox in tqdm(bboxes.items(), "Processing images..."):
             image = skimage.io.imread(f'{path}/{b}/{sections[i]}')
             image = (image / 255).astype(np.uint8)
 
             ratio_y, ratio_x = (np.array(image.shape) // np.array(atlas_array[:, :, i].shape)).tolist()
+            ratios[i] = (ratio_y, ratio_x)
 
             thumbnail = cv2.resize(image, (image.shape[0] // 64, image.shape[1] // 64))
             cv2.imwrite(f'{output_dir}/{dir_name}/thumbnail-{dir_name}-{i}.jpg', thumbnail)
@@ -114,6 +117,9 @@ def main(path, output_dir, section_data_dir):
                 x, y, w, h = bb
                 crop = image[y * ratio_y: (y + h) * ratio_y, x * ratio_x: (x + w) * ratio_x]
                 cv2.imwrite(f'{output_dir}/{dir_name}/full-{dir_name}-{i}-{x * ratio_x}_{y * ratio_y}_{w * ratio_y}_{h * ratio_y}.jpg', crop)
+
+        with open(f'{output_dir}/{dir_name}/ratios.pickle', 'wb') as f:
+            pickle.dump(ratios, f)
 
 
 if __name__ == '__main__':
