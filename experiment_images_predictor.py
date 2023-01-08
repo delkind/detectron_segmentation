@@ -11,9 +11,13 @@ from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 from detectron2.model_zoo import model_zoo
 from detectron2.utils.visualizer import GenericMask
+from scipy import ndimage
+from skimage.feature import peak_local_max
+from skimage.morphology import watershed
 
 from dir_watcher import DirWatcher
 from experiment_process_task_manager import ExperimentProcessTaskManager
+from shapely.geometry import Polygon
 
 
 def extract_predictions(predictions):
@@ -32,6 +36,36 @@ def extract_predictions(predictions):
 
     polygons = [poly.reshape(-1, 2) for mask in masks for poly in mask.polygons]
     return polygons, mask
+
+
+def perform_watershed(mask, min_distance=5):
+    distances = ndimage.distance_transform_edt(mask)
+    local_max = peak_local_max(distances, indices=False, min_distance=min_distance,
+                               labels=mask)
+    # perform a connected component analysis on the local peaks,
+    # using 8-connectivity, then appy the Watershed algorithm
+    markers = ndimage.label(local_max, structure=np.ones((3, 3)))[0]
+    # markers = ndimage.label(local_max)[0]
+    labels = watershed(-distances, markers, mask=mask)
+    polys = []
+    for label in np.unique(labels):
+        # if the label is zero, we are examining the 'background'
+        # so simply ignore it
+        if label == 0:
+            continue
+        # otherwise, allocate memory for the label region and draw
+        # it on the mask
+        mask = np.zeros_like(mask, dtype=np.uint8)
+        mask[labels == label] = 255
+        # detect contours in the mask and grab the largest one
+        cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+        cnts = [c.squeeze() for c in cnts if c.shape[0] > 2]
+        if cnts:
+            c = max(cnts, key=lambda cnt: Polygon(cnt.squeeze()).area)
+            polys += [c.squeeze()]
+
+    return polys
 
 
 def create_crops_list(border_size, crop_size, image):
@@ -84,32 +118,41 @@ class ExperimentImagesPredictor(DirWatcher):
         mask = np.isin(segmentation, list(self.structure_ids))
         with open(f'{directory}/bboxes.pickle', 'rb') as f:
             bboxes = pickle.load(f)
+        try:
+            with open(f'{directory}/ratios.pickle', 'rb') as f:
+                ratios = pickle.load(f)
+        except FileNotFoundError:
+            ratios = {s: (64, 64) for s in bboxes.keys()}
         sections = sorted([s for s in bboxes.keys() if bboxes[s]])
         for section in sorted(sections):
-            self.process_section(directory, experiment_id, section, bboxes[section], mask[:, :, section])
+            self.process_section(directory, experiment_id, section, bboxes[section], mask[:, :, section], ratios[section])
 
-    def process_section(self, directory, experiment_id, section, bboxes, mask):
+    def process_section(self, directory, experiment_id, section, bboxes, mask, ratios):
         self.logger.info(f"Experiment {experiment_id}: processing section {section}...")
         for bbox in bboxes:
-            x, y, w, h = bbox.scale(64)
-            cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png'
+            x, y, w, h = bbox
+            x = x * ratios[0]
+            w = w * ratios[0]
+            y = y * ratios[1]
+            h = h * ratios[1]
+            cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.npz'
             if not os.path.isfile(cellmask_fname):
                 image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
                                    cv2.IMREAD_GRAYSCALE)
-                img_mask = self.predict_cells(image, mask, x, y)
-                cv2.imwrite(cellmask_fname,
-                            np.stack([np.zeros_like(img_mask), img_mask, np.zeros_like(img_mask)], axis=2))
+                polys = self.predict_cells(image, mask, x, y, ratios)
+                np.savez(cellmask_fname, polys)
             else:
                 self.logger.info(f"{cellmask_fname} already exists, skipping segmentation...")
 
-    def predict_cells(self, image, section_mask, x, y):
+    def predict_cells(self, image, section_mask, x, y, ratios):
         crops = create_crops_list(self.border_size, self.crop_size, image)
         cell_mask = np.zeros_like(image)
-        mask_basex, mask_basey, mask_crop_size = map(lambda v: v // 64, [x, y, self.crop_size])
+        mask_basex, mask_crop_sizex = map(lambda v: v // ratios[0], [x, self.crop_size])
+        mask_basey, mask_crop_sizey = map(lambda v: v // ratios[1], [y, self.crop_size])
         for crop, coords in crops:
-            ym, xm = coords[0] // 64 + mask_basey, coords[1] // 64 + mask_basex
-            if section_mask[ym: min(ym + mask_crop_size + 1, section_mask.shape[0] - 1),
-               xm: min(xm + mask_crop_size + 1, section_mask.shape[1] - 1)].sum() > 0:
+            ym, xm = coords[0] // ratios[1] + mask_basey, coords[1] // ratios[0] + mask_basex
+            if section_mask[ym: min(ym + mask_crop_sizey + 1, section_mask.shape[0] - 1),
+               xm: min(xm + mask_crop_sizex + 1, section_mask.shape[1] - 1)].sum() > 0:
                 outputs = self.cell_model(cv2.cvtColor(image[coords[0]: coords[0] + self.crop_size,
                                           coords[1]: coords[1] + self.crop_size], cv2.COLOR_GRAY2BGR))
                 _, mask = extract_predictions(outputs["instances"].to("cpu"))
@@ -118,12 +161,7 @@ class ExperimentImagesPredictor(DirWatcher):
                         np.logical_or(cell_mask[coords[0]: coords[0] + self.crop_size,
                                       coords[1]: coords[1] + self.crop_size], mask)
 
-        ctrs, _ = cv2.findContours(cell_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        mask = np.zeros_like(cell_mask)
-        cv2.fillPoly(mask, ctrs, color=255)
-        ctrs, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        mask = np.zeros_like(cell_mask)
-        cv2.polylines(mask, ctrs, isClosed=True, color=255)
+        polys = perform_watershed(cell_mask)
         return mask
 
 
@@ -134,8 +172,8 @@ class ExperimentPredictorTaskManager(ExperimentProcessTaskManager):
     def add_args(self, parser: argparse.ArgumentParser):
         super().add_args(parser)
         parser.add_argument('--cell_model', action='store', required=True, help='Cell segmentation model')
-        parser.add_argument('--crop_size', default=312, type=int, action='store', help='Size of a single crop')
-        parser.add_argument('--border_size', default=20, type=int, action='store',
+        parser.add_argument('--crop_size', default=160, type=int, action='store', help='Size of a single crop')
+        parser.add_argument('--border_size', default=10, type=int, action='store',
                             help='Size of the border (to make crops overlap)')
         parser.add_argument('--device', default='cuda', action='store', help='Model execution device')
         parser.add_argument('--threshold', default=0.5, action='store', help='Prediction threshold')
