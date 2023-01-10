@@ -131,10 +131,10 @@ class ExperimentImagesPredictor(DirWatcher):
         self.logger.info(f"Experiment {experiment_id}: processing section {section}...")
         for bbox in bboxes:
             x, y, w, h = bbox
-            x = x * ratios[0]
-            w = w * ratios[0]
-            y = y * ratios[1]
-            h = h * ratios[1]
+            x = x * ratios[1]
+            w = w * ratios[1]
+            y = y * ratios[0]
+            h = h * ratios[0]
             cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png'
             if not os.path.isfile(cellmask_fname):
                 self.logger.info(f"Experiment {experiment_id}: processing file {directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg...")
@@ -149,10 +149,10 @@ class ExperimentImagesPredictor(DirWatcher):
     def predict_cells(self, image, section_mask, x, y, ratios):
         crops = create_crops_list(self.border_size, self.crop_size, image)
         cell_mask = np.zeros_like(image)
-        mask_basex, mask_crop_sizex = map(lambda v: v // ratios[0], [x, self.crop_size])
-        mask_basey, mask_crop_sizey = map(lambda v: v // ratios[1], [y, self.crop_size])
+        mask_basex, mask_crop_sizex = map(lambda v: v // ratios[1], [x, self.crop_size])
+        mask_basey, mask_crop_sizey = map(lambda v: v // ratios[0], [y, self.crop_size])
         for crop, coords in crops:
-            ym, xm = coords[0] // ratios[1] + mask_basey, coords[1] // ratios[0] + mask_basex
+            ym, xm = coords[0] // ratios[0] + mask_basey, coords[1] // ratios[1] + mask_basex
             if section_mask[ym: min(ym + mask_crop_sizey + 1, section_mask.shape[0] - 1),
                xm: min(xm + mask_crop_sizex + 1, section_mask.shape[1] - 1)].sum() > 0:
                 outputs = self.cell_model(cv2.cvtColor(image[coords[0]: coords[0] + self.crop_size,

@@ -116,7 +116,7 @@ def main(path, output_dir, section_data_dir):
             for bb in bbox:
                 x, y, w, h = bb
                 crop = image[y * ratio_y: (y + h) * ratio_y, x * ratio_x: (x + w) * ratio_x]
-                cv2.imwrite(f'{output_dir}/{dir_name}/full-{dir_name}-{i}-{x * ratio_x}_{y * ratio_y}_{w * ratio_y}_{h * ratio_y}.jpg', crop)
+                cv2.imwrite(f'{output_dir}/{dir_name}/full-{dir_name}-{i}-{x * ratio_x}_{y * ratio_y}_{w * ratio_x}_{h * ratio_y}.jpg', crop)
 
         with open(f'{output_dir}/{dir_name}/ratios.pickle', 'wb') as f:
             pickle.dump(ratios, f)
