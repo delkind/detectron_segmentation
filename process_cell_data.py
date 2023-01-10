@@ -75,6 +75,8 @@ def perform_watershed(mask, min_distance=3):
 def apply_watershed(image):
     cnts, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = np.array([c.squeeze() for c in cnts if c.shape[0] > 2], dtype=object)
+    if not cnts:
+        return []
     polys = np.vectorize(lambda p: Polygon(p))(cnts)
     roundness = np.vectorize(lambda pp: (pp.area * 4 * math.pi) / (pp.length ** 2))(polys)
     to_split = roundness < np.quantile(roundness, 0.30)
@@ -498,8 +500,9 @@ class ExperimentCellsProcessor(object):
 
         for offset_x, offset_y, w, h in map(lambda b: b.scale_xy(self.ratios[section]), self.bboxes[section]):
             cells = self.get_cell_mask(section, offset_x, offset_y, w, h, struct_mask)
-            box_cell_data = self.polygons_to_cell_data(cells, section, brain_bbox.x + brain_bbox.w // 2)
-            cells_data += box_cell_data
+            if cells:
+                box_cell_data = self.polygons_to_cell_data(cells, section, brain_bbox.x + brain_bbox.w // 2)
+                cells_data += box_cell_data
 
         return cells_data, {
             'experiment_id': self.id,
