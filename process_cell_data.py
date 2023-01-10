@@ -22,7 +22,7 @@ from skimage.feature import peak_local_max
 from shapely.geometry import Polygon
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier
-from skimage.morphology import watershed
+from skimage.segmentation import watershed
 
 from annotate_cell_data import ExperimentDataAnnotator
 from dir_watcher import DirWatcher
