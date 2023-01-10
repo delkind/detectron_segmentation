@@ -23,6 +23,12 @@ def prepare_data(data, plot=False):
     valid_data = filter_brightness_correlated_data(valid_data, plot)
     valid_data = filter_asymmetric_regions(valid_data)
     valid_data = filter_count_outliers(valid_data)
+
+    print(f"Brains discarded: {len(data.experiment_id.unique()) - len(valid_data.experiment_id.unique())} out "
+          f"of {len(data.experiment_id.unique())}. {len(valid_data.experiment_id.unique())} good brains left.")
+    print(f"Regions discarded: {len(data.region.unique()) - len(valid_data.region.unique())} out "
+          f"of {len(data.region.unique())}. {len(valid_data.region.unique())} good brains left.")
+
     return valid_data
 
 

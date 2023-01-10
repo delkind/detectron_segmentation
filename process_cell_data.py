@@ -9,7 +9,6 @@ import pickle
 import socket
 import time
 import urllib.error
-from itertools import groupby
 
 import cv2
 import numpy as np
@@ -18,9 +17,12 @@ import scipy.ndimage as ndi
 import simplejson
 from allensdk.api.queries.mouse_connectivity_api import MouseConnectivityApi
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
+from scipy import ndimage
+from skimage.feature import peak_local_max
 from shapely.geometry import Polygon
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier
+from skimage.morphology import watershed
 
 from annotate_cell_data import ExperimentDataAnnotator
 from dir_watcher import DirWatcher
@@ -28,14 +30,69 @@ from experiment_process_task_manager import ExperimentProcessTaskManager
 from localize_brain import detect_brain
 from util import infinite_dict
 
-SLAB_SIZE = 6
-
+DEFAULT_RATIO = 64
 
 def get_center_x(section_seg_data):
     _, bbox, _ = detect_brain((section_seg_data != 0).astype(np.uint8) * 255)
     center_x = bbox.x + bbox.w // 2
     return center_x
 
+def perform_watershed(mask, min_distance=3):
+    distances = ndimage.distance_transform_edt(mask)
+    local_max = peak_local_max(distances, indices=False, min_distance=min_distance,
+                               labels=mask)
+    if local_max.sum() != 0:
+        # perform a connected component analysis on the local peaks,
+        # using 8-connectivity, then appy the Watershed algorithm
+        markers = ndimage.label(local_max, structure=np.ones((3, 3)))[0]
+        # markers = ndimage.label(local_max)[0]
+        labels = watershed(-distances, markers, mask=mask)
+    else:
+        labels = mask
+
+    polys = []
+
+    for label in np.unique(labels):
+        # if the label is zero, we are examining the 'background'
+        # so simply ignore it
+        if label == 0:
+            continue
+        # otherwise, allocate memory for the label region and draw
+        # it on the mask
+        mask = np.zeros_like(mask, dtype=np.uint8)
+        mask[labels == label] = 255
+        # detect contours in the mask and grab the largest one
+        cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+        cnts = [c.squeeze() for c in cnts if c.shape[0] > 2]
+        if cnts:
+            c = max(cnts, key=lambda cnt: Polygon(cnt.squeeze()).area)
+            polys += [c.squeeze()]
+
+    return polys
+
+
+def apply_watershed(image):
+    cnts, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = np.array([c.squeeze() for c in cnts if c.shape[0] > 2], dtype=object)
+    polys = np.vectorize(lambda p: Polygon(p))(cnts)
+    roundness = np.vectorize(lambda pp: (pp.area * 4 * math.pi) / (pp.length ** 2))(polys)
+    to_split = roundness < np.quantile(roundness, 0.30)
+
+    bad = cnts[to_split]
+    good = cnts[~to_split]
+
+    splitted = []
+
+    for p in bad:
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        mins = p.min(axis=0)
+        cv2.drawContours(mask, [p - mins], -1, color=255, thickness=-1)
+        pp = perform_watershed(mask)
+        if pp:
+            splitted += [c + mins for c in pp]
+
+    return good.tolist() + splitted
 
 class ExperimentCellsProcessor(object):
     def __init__(self, mcc, experiment_id, directory, brain_seg_data_dir, parent_struct_id,
@@ -47,20 +104,56 @@ class ExperimentCellsProcessor(object):
         self.directory = directory
         self.mcc = mcc
         self.id = experiment_id
+        with open(f'{self.directory}/bboxes.pickle', "rb") as f:
+            bboxes = pickle.load(f)
         mapi = MouseConnectivityApi()
-        while True:
-            try:
-                self.details = {**details, **(mapi.get_experiment_detail(self.id)[0])}
-                break
-            except simplejson.errors.JSONDecodeError or urllib.error.URLError or urllib.error.URLError:
-                time.sleep(1.0)
+        if details is not None:
+            while True:
+                try:
+                    self.details = {**details, **(mapi.get_experiment_detail(self.id)[0])}
+                    self.subimages = {i['section_number']: {**i, 'resolution_x': i['resolution'],
+                                                            'resolution_y': i['resolution']}
+                                      for i in self.details['sub_images']}
+                    break
+                except simplejson.errors.JSONDecodeError or urllib.error.URLError or urllib.error.URLError:
+                    time.sleep(1.0)
+
+            self.ratios = {i: (DEFAULT_RATIO, DEFAULT_RATIO) for i in bboxes.keys()}
+        else:
+            with open(f'{self.directory}/ratios.pickle', "rb") as f:
+                self.ratios = pickle.load(f)
+            self.subimages = {i:
+                {'annotated': False,
+                 'axes': None,
+                 'bits_per_component': 16,
+                 'data_set_id': experiment_id,
+                 'expression': None,
+                 'expression_path': None,
+                 'failed': False,
+                 'height': 18000,
+                 'id': experiment_id,
+                 'image_height': 18000,
+                 'image_type': 'Primary',
+                 'image_width': 24950,
+                 'isi_experiment_id': None,
+                 'lims1_id': None,
+                 'number_of_components': 3,
+                 'ophys_experiment_id': None,
+                 'path': '/external/whbi/prod59/0500351591-0001_552961641/0500351591-0001.aff',
+                 'projection_function': None,
+                 'resolution_x': 0.69,
+                 'resolution_y': 0.655,
+                 'section_number': i,
+                 'specimen_id': None,
+                 'structure_id': None,
+                 'tier_count': 9,
+                 'width': 24950,
+                 'x': 1,
+                 'y': 1} for i in bboxes.keys()}
         self.logger = logger
-        self.subimages = {i['section_number']: i for i in self.details['sub_images']}
         self.seg_data = np.load(f'{self.brain_seg_data_dir}/{self.id}/{self.id}-sections.npz')['arr_0']
         self.structure_tree = self.mcc.get_structure_tree()
         self.structure_ids = self.get_requested_structure_children()
-        with open(f'{self.directory}/bboxes.pickle', "rb") as f:
-            bboxes = pickle.load(f)
         self.bboxes = {k: v for k, v in bboxes.items() if v}
 
     def get_requested_structure_children(self):
@@ -82,17 +175,16 @@ class ExperimentCellsProcessor(object):
         for section in sorted(np.unique(csv.section)):
             csv_section = csv[csv.section == section]
             self.logger.debug(f"Creating heatmap experiment {self.id} section {section}")
-            image = np.zeros((self.seg_data.shape[0] * 64, self.seg_data.shape[1] * 64), dtype=np.int16)
+            image = np.zeros((self.seg_data.shape[0] * self.ratios[section][0], self.seg_data.shape[1] * self.ratios[section][1]), dtype=np.uint8)
             for bbox in self.bboxes.get(section, []):
-                x, y, w, h = bbox.scale(64)
-                cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png',
-                                      cv2.IMREAD_GRAYSCALE)
+                x, y, w, h = bbox.scale_xy(self.ratios[section])
+                cellmask = cv2.imread(f'{self.directory}/cellmask-{self.id}-{section}-{x}_{y}_{w}_{h}.png')
+                cellmask = (cellmask[:, :, 0] | cellmask[:, :, 1] | cellmask[:, :, 2]).astype(np.uint8)
                 cnts, _ = cv2.findContours(cellmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 cnts = [c for c in cnts if c.shape[0] > 2]
-                cnts = [c for c in cnts if math.pi < Polygon(c.squeeze()).area *
-                        (self.subimages[section]['resolution'] ** 2) < math.pi * 36]
                 new_img = np.zeros_like(cellmask)
-                new_img = cv2.fillPoly(new_img, cnts, color=1)
+                for c in cnts:
+                    new_img = cv2.fillPoly(new_img, [c], color=1)
                 image[y: y + cellmask.shape[0], x: x + cellmask.shape[1]] = new_img
 
             centroids_y = csv_section.centroid_y.to_numpy().astype(int)
@@ -102,7 +194,7 @@ class ExperimentCellsProcessor(object):
             csv.at[csv.section == section, 'coverage'] = coverages / 4096
 
     def build_dense_masks(self, celldata_struct, dense_masks, relevant_sections):
-        scale = 64 // (dense_masks.shape[0] // self.seg_data.shape[0])
+        scale = DEFAULT_RATIO // (dense_masks.shape[0] // self.seg_data.shape[0])
         for section in relevant_sections:
             self.logger.debug(f"Analyzing section {section}")
             celldata_section = celldata_struct[celldata_struct.section == section]
@@ -133,7 +225,7 @@ class ExperimentCellsProcessor(object):
         radii = np.maximum((celldata_section.coverage.to_numpy() * radius + 0.5), 1).astype(int)
         for i in range(centroids_x.shape[0]):
             cv2.circle(dense_mask, (centroids_x[i], centroids_y[i]), radii[i], 1, cv2.FILLED)
-        dense_mask = ndi.binary_dilation(dense_mask, ndi.generate_binary_structure(2, 64 // scale), iterations=6)
+        dense_mask = ndi.binary_dilation(dense_mask, ndi.generate_binary_structure(2, DEFAULT_RATIO // scale), iterations=6)
         return self.remove_small_components(dense_mask)
 
     def produce_coarse_dense_mask(self, centroids_x, centroids_y, dense, yhat):
@@ -157,8 +249,8 @@ class ExperimentCellsProcessor(object):
         heatmaps = dict()
         for section in relevant_sections:
             heatmaps[section] = np.zeros_like(self.seg_data[:, :, section], dtype=float)
-            heatmaps[section][data_frame[data_frame.section == section].centroid_y.to_numpy().astype(int) // 64,
-                              data_frame[data_frame.section == section].centroid_x.to_numpy().astype(int) // 64] = \
+            heatmaps[section][data_frame[data_frame.section == section].centroid_y.to_numpy().astype(int) // self.ratios[section][0],
+                              data_frame[data_frame.section == section].centroid_x.to_numpy().astype(int) // self.ratios[section][0]] = \
                 data_frame[data_frame.section == section].coverage
         import matplotlib.pyplot as plt
         for section in range(dense_masks.shape[2]):
@@ -172,7 +264,7 @@ class ExperimentCellsProcessor(object):
     def detect_dense_dg(self, data_frame):
         dg_structs = [10703, 10704, 632]
         scale = 4
-        scaling_factor = 64 // scale
+        scaling_factor = DEFAULT_RATIO // scale
         celldata_indices = data_frame.index[data_frame.structure_id.isin(dg_structs)]
         celldata_struct = data_frame.iloc[celldata_indices]
         relevant_sections = sorted(np.unique(celldata_struct.section.to_numpy()).tolist())
@@ -232,7 +324,7 @@ class ExperimentCellsProcessor(object):
 
     def detect_dense_ca(self, csv):
         scale = 8
-        scaling_factor = 64 // scale
+        scaling_factor = DEFAULT_RATIO // scale
 
         structures_including_dense = [f'Field CA{i}' for i in range(1, 4)]
         dense_struct_ids = [r['id'] for r in
@@ -302,19 +394,17 @@ class ExperimentCellsProcessor(object):
                     section_seg_data[mask_y[relevant_cells], mask_x[relevant_cells]] = region
 
             center_x = get_center_x(section_seg_data)
-            scale_factor = (0.35 * 64) / (section_seg_data.shape[0] / self.seg_data.shape[0])
+            scale_factor_y = (self.subimages[section]['resolution_y'] * self.ratios[section][0]) / (section_seg_data.shape[0] / self.seg_data.shape[0])
+            scale_factor_x = (self.subimages[section]['resolution_x'] * self.ratios[section][1]) / (section_seg_data.shape[1] / self.seg_data.shape[1])
             relevant_regions = np.intersect1d(np.unique(section_seg_data),
                                               cells[cells.section == section].structure_id.unique())
             for region in relevant_regions:
                 region_cells = np.where(section_seg_data == region)
-                globs_per_section[region][section]['region_area'] = region_cells[0].shape[0] * (scale_factor ** 2)
+                globs_per_section[region][section]['region_area'] = region_cells[0].shape[0] * (scale_factor_y * scale_factor_x)
                 globs_per_section[region][section]['region_area_left'] = np.where(region_cells[1] < center_x)[0].shape[
-                                                                             0] * (
-                                                                                 scale_factor ** 2)
+                                                                             0] * (scale_factor_y * scale_factor_x)
                 globs_per_section[region][section]['region_area_right'] = \
-                    np.where(region_cells[1] >= center_x)[0].shape[
-                        0] * (
-                            scale_factor ** 2)
+                    np.where(region_cells[1] >= center_x)[0].shape[0] * (scale_factor_y * scale_factor_x)
 
         return globs_per_section
 
@@ -341,26 +431,30 @@ class ExperimentCellsProcessor(object):
         self.logger.info(f"Calculating coverages for {self.id}...")
         self.calculate_coverages(cell_dataframe)
 
-        self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
-        cell_dataframe['dense'] = False
+        if all(map(lambda s: self.ratios[s] == (DEFAULT_RATIO, DEFAULT_RATIO), self.ratios.keys())):
+            self.logger.info(f"Extracting dense layers for CA regions in {self.id}...")
+            cell_dataframe['dense'] = False
 
-        dense_masks = [self.detect_dense_ca(cell_dataframe)]
+            dense_masks = [self.detect_dense_ca(cell_dataframe)]
 
-        self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
-        dense_masks += [self.detect_dense_dg(cell_dataframe)]
+            self.logger.info(f"Extracting dense layers for DG regions in {self.id}...")
+            dense_masks += [self.detect_dense_dg(cell_dataframe)]
 
-        dense_masks = functools.reduce(lambda x, y: {**x, **y}, dense_masks)
+            dense_masks = functools.reduce(lambda x, y: {**x, **y}, dense_masks)
+        else:
+            dense_masks = dict()
 
         self.logger.info(f"Calculating global parameters for {self.id}...")
         globs = self.calculate_global_parameters(dense_masks, cell_dataframe)
-        self.logger.info(f"Converting sparse CA structure IDs for {self.id}...")
-        for struct in ['CA1', 'CA2', 'CA3']:
-            sparse_id = self.mcc.get_structure_tree().get_structures_by_acronym([f'{struct}sr'])[0]['id']
-            generic_id = self.mcc.get_structure_tree().get_structures_by_acronym([struct])[0]['id']
-            cell_dataframe.at[(cell_dataframe.structure_id == generic_id) & (cell_dataframe.dense == False),
-                              'structure_id'] = sparse_id
-            globs[sparse_id] = globs[generic_id]
-            del globs[generic_id]
+        if dense_masks:
+            self.logger.info(f"Converting sparse CA structure IDs for {self.id}...")
+            for struct in ['CA1', 'CA2', 'CA3']:
+                sparse_id = self.mcc.get_structure_tree().get_structures_by_acronym([f'{struct}sr'])[0]['id']
+                generic_id = self.mcc.get_structure_tree().get_structures_by_acronym([struct])[0]['id']
+                cell_dataframe.at[(cell_dataframe.structure_id == generic_id) & (cell_dataframe.dense == False),
+                                  'structure_id'] = sparse_id
+                globs[sparse_id] = globs[generic_id]
+                del globs[generic_id]
 
         self.logger.info(f"Saving cell data for {self.id}...")
         cell_dataframe.to_parquet(f'{self.directory}/celldata-{self.id}.parquet')
@@ -377,18 +471,17 @@ class ExperimentCellsProcessor(object):
         cell_mask_file_name = os.path.join(self.directory,
                                            f'cellmask-{self.id}-{section}-{offset_x}_{offset_y}_{w}_{h}.png')
         cell_mask = cv2.imread(cell_mask_file_name, cv2.IMREAD_COLOR)[:, :, 1]
-        cnts, _ = cv2.findContours(cell_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        cnts = apply_watershed(cell_mask)
         offset = np.array([offset_x, offset_y])
         cnts = [Polygon(cnt.squeeze() + offset) for cnt in cnts if cnt.shape[0] > 2]
         cnts = [poly for poly in cnts
-                if mask[int(poly.centroid.y) // 64, int(poly.centroid.x) // 64]
-                and math.pi < poly.area * (self.subimages[section]['resolution'] ** 2) < 36 * math.pi]
+                if mask[int(poly.centroid.y) // self.ratios[section][0], int(poly.centroid.x) // self.ratios[section][1]]
+                and math.pi < poly.area * (self.subimages[section]['resolution_y'] * self.subimages[section]['resolution_x']) < 36 * math.pi]
         return cnts
 
     def get_brain_metrics(self, section):
-        thumbnail_file_name = os.path.join(self.directory, f'thumbnail-{self.id}-{section}.jpg')
-        thumbnail = cv2.imread(thumbnail_file_name, cv2.IMREAD_GRAYSCALE)
-        brain_mask, bbox, ctrs = detect_brain(thumbnail)
+        brain_mask, bbox, ctrs = detect_brain(((self.seg_data[:, :, section] != 0) * 255).astype(np.uint8))
         brain_area = sum([Polygon(ctr.squeeze()).area for ctr in ctrs])
         return brain_area, bbox
 
@@ -396,14 +489,14 @@ class ExperimentCellsProcessor(object):
         brain_area, brain_bbox = self.get_brain_metrics(section)
         struct_mask = self.get_structure_mask(section)
 
-        brain_bbox = brain_bbox.scale(64)
+        brain_bbox = brain_bbox.scale_xy(self.ratios[section])
 
         self.logger.debug(f"Experiment: {self.id}, processing section {section}...")
         struct_area = struct_mask.sum()
 
         cells_data = list()
 
-        for offset_x, offset_y, w, h in map(lambda b: b.scale(64), self.bboxes[section]):
+        for offset_x, offset_y, w, h in map(lambda b: b.scale_xy(self.ratios[section]), self.bboxes[section]):
             cells = self.get_cell_mask(section, offset_x, offset_y, w, h, struct_mask)
             box_cell_data = self.polygons_to_cell_data(cells, section, brain_bbox.x + brain_bbox.w // 2)
             cells_data += box_cell_data
@@ -411,8 +504,8 @@ class ExperimentCellsProcessor(object):
         return cells_data, {
             'experiment_id': self.id,
             'section_id': section,
-            'brain_area': brain_area * ((self.subimages[section]['resolution'] * 64) ** 2),
-            'struct_area': struct_area * ((self.subimages[section]['resolution'] * 64) ** 2)
+            'brain_area': brain_area * ((self.subimages[section]['resolution_y']) * self.subimages[section]['resolution_x']) * self.ratios[section][0] * self.ratios[section][1],
+            'struct_area': struct_area * ((self.subimages[section]['resolution_y']) * self.subimages[section]['resolution_x']) * self.ratios[section][0] * self.ratios[section][1]
         }
 
     def polygons_to_cell_data(self, cells, section, center_x):
@@ -420,15 +513,15 @@ class ExperimentCellsProcessor(object):
         box_cell_data = [{'section': section, 'structure_id': struct_id, 'centroid_x': int(cell.centroid.x),
                           'centroid_y': int(cell.centroid.y),
                           'side': 'left' if cell.centroid.x <= center_x else 'right',
-                          'area': cell.area * (self.subimages[section]['resolution'] ** 2),
-                          'diameter': 2 * math.sqrt(cell.area * (self.subimages[section]['resolution'] ** 2) / math.pi),
-                          'perimeter': cell.length * self.subimages[section]['resolution'], } for cell, struct_id in
+                          'area': cell.area * (self.subimages[section]['resolution_y'] * self.subimages[section]['resolution_x']),
+                          'diameter': 2 * math.sqrt(cell.area * (self.subimages[section]['resolution_y'] * self.subimages[section]['resolution_x']) / math.pi),
+                          'perimeter': cell.length * (self.subimages[section]['resolution_y'] + self.subimages[section]['resolution_y'])/2} for cell, struct_id in
                          zip(cells, struct_ids) if struct_id in self.structure_ids]
         return box_cell_data
 
     def get_struct_id(self, cell, section):
-        y = int(cell.centroid.y // 64)
-        x = int(cell.centroid.x // 64)
+        y = int(cell.centroid.y // self.ratios[section][0])
+        x = int(cell.centroid.x // self.ratios[section][1])
         struct_id = self.seg_data[y, x, section]
         if struct_id == 0:
             neighborhood = self.seg_data[y - 1: y + 2, x - 1: x + 2, section]
@@ -483,12 +576,12 @@ class CellProcessor(DirWatcher):
                                               self.brain_seg_data_dir,
                                               self.structure_ids,
                                               self.experiment_fields_to_save,
-                                              self.experiments[item],
+                                              self.experiments.get(item, None),
                                               self.logger)
         experiment.process()
 
         if self.annotate:
-            annotator = ExperimentDataAnnotator(int(item), directory, self.logger)
+            annotator = ExperimentDataAnnotator(int(item), directory, self.brain_seg_data_dir, self.logger)
             annotator.process()
 
     def on_process_error(self, item, exception):

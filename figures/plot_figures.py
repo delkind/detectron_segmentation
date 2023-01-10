@@ -2,6 +2,7 @@ from figures.clean_data import prepare_data
 from figures.figure1 import figure1
 from figures.figure2 import figure2
 from figures.figure3 import figure3
+from figures.figure4 import figure4
 from figures.util import load_data, fig_config, get_subplots, produce_figure, plot_grid, plot_annotations, plot_scatter
 import numpy as np
 import pickle
@@ -32,19 +33,22 @@ def main():
     fig_config['path'] = "3"
     figure3(valid_data)
 
+    fig_config['path'] = "4"
+    figure4(valid_data)
+
 
 def display():
     data = load_data()
 
     fig_config['save_fig'] = True
-    fig_config['display'] = False
+    fig_config['display'] = True
 
     fig_config['path'] = "2"
     fig_config['prefix'] = 'preclean_'
     # figure2(data, False)
 
     fig_config['prefix'] = 'brightclean_'
-    valid_data = prepare_data(data, plot=True)
+    valid_data = prepare_data(data, plot=False)
 
     fig_config['prefix'] = 'postclean_'
     fig_config['path'] = "2"
@@ -55,8 +59,11 @@ def display():
 
     # figure1(data, valid_data)
 
-    fig_config['path'] = "3"
-    figure3(valid_data)
+    # fig_config['path'] = "3"
+    # figure3(valid_data)
+
+    fig_config['path'] = "4"
+    figure4(valid_data)
 
 
 def test_figure():

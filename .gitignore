@@ -7,3 +7,6 @@ mouse_connectivity/
 *.zip
 *.pickle
 connectivity/
+scratch/
+*/.DS_Store
+.DS_Store

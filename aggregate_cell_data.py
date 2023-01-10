@@ -14,6 +14,8 @@ from tqdm import tqdm
 
 from process_cell_data import get_center_x
 
+DEPTH_OF_FIELD = 1.5
+
 mcc = MouseConnectivityCache(manifest_file='mouse_connectivity/mouse_connectivity_manifest.json', resolution=25)
 
 if os.path.isfile('mouse_connectivity/tree.pickle'):
@@ -121,18 +123,18 @@ def calculate_section_dependent_data(cells, globs):
             }
 
 
-def get_densities(cells_region, centers, diameter, region_data, section):
+def get_densities(cells_region, centers, diameter, region_data, section, ratios):
     density_left = len(cells_region[(cells_region.section == section) &
-                                    (cells_region.centroid_x // 64 < centers[section])]) \
-                   / (region_data[section]['region_area_left'] * (diameter + 1.5)) \
+                                    (cells_region.centroid_x // ratios[section][1] < centers[section])]) \
+                   / (region_data[section]['region_area_left'] * (diameter + DEPTH_OF_FIELD)) \
         if region_data[section]['region_area_left'] > 0 else 0
     density_right = len(cells_region[(cells_region.section == section) &
-                                     (cells_region.centroid_x // 64 >= centers[section])]) \
-                    / (region_data[section]['region_area_right'] * (diameter + 1.5)) \
+                                     (cells_region.centroid_x // ratios[section][1] >= centers[section])]) \
+                    / (region_data[section]['region_area_right'] * (diameter + DEPTH_OF_FIELD)) \
         if region_data[section]['region_area_right'] > 0 else 0
 
     density = len(cells_region[(cells_region.section == section)]) / (region_data[section]['region_area'] * (diameter
-                                                                      + 1.5)) \
+                                                                                                             + DEPTH_OF_FIELD)) \
         if region_data[section]['region_area'] > 0 else 0
 
     return density_left, density_right, density
@@ -141,7 +143,7 @@ def get_densities(cells_region, centers, diameter, region_data, section):
 quantiles = [0.5, 0.7, 0.9, 0.98]
 
 
-def calculate_global_parameters(cells, globs_per_section, seg):
+def calculate_global_parameters(cells, globs_per_section, seg, ratios):
     result = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 
     centers = {s: get_center_x(seg[:, :, s]) for s in cells.section.unique()}
@@ -164,9 +166,9 @@ def calculate_global_parameters(cells, globs_per_section, seg):
 
             for q in quantiles:
                 density1_left, density1_right, density1 = get_densities(cells_region, centers,
-                                                                        diameter[q], region_data, s1)
+                                                                        diameter[q], region_data, s1, ratios)
                 density2_left, density2_right, density2 = get_densities(cells_region, centers,
-                                                                        diameter[q], region_data, s2)
+                                                                        diameter[q], region_data, s2, ratios)
 
                 density_left = (density1_left + density2_left) / 2
                 density_right = (density1_right + density2_right) / 2
@@ -208,6 +210,14 @@ def process_experiment(t):
 
         with open(f'{data_dir}/{experiment}/bboxes.pickle', 'rb') as f:
             bboxes = pickle.load(f)
+
+        try:
+            with open(f'{data_dir}/{experiment}/ratios.pickle', 'rb') as f:
+                ratios = pickle.load(f)
+        except FileNotFoundError:
+            ratios = {i: (64, 64) for i in bboxes.keys()}
+
+
         sections = sorted([s for s in bboxes.keys() if bboxes[s]])
         sections = {s: (cv2.imread(f"{data_dir}/{experiment}/thumbnail-{experiment}-{s}.jpg",
                                    cv2.IMREAD_COLOR)[:seg.shape[0], :seg.shape[1], 1],
@@ -215,7 +225,7 @@ def process_experiment(t):
                                    cv2.IMREAD_GRAYSCALE)[:seg.shape[0], :seg.shape[1]]) for s in sections}
 
         maps = pickle.load(bz2.open(os.path.join(f'{data_dir}/{experiment}', f'maps.pickle.bz2'), 'rb'))
-        globs = calculate_global_parameters(cells, maps['globs'], seg)
+        globs = calculate_global_parameters(cells, maps['globs'], seg, ratios)
 
         relevant_structs = set(globs.keys())
         relevant_aggregates = get_struct_aggregates(relevant_structs)

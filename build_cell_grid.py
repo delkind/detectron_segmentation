@@ -9,14 +9,20 @@ from tqdm import tqdm
 from annotate_cell_data import produce_patch_collection, plot_patch_collection
 from rect import Rect
 
+DPI = 125
+
 NROWS = 10
 NCOLS = 7
 FIG_SCALE = 20
-
+COLOR_MAPPINGS = {
+    (255, 252, 145): (153, 153, 20),
+    (255, 253, 188): (153, 153, 10),
+    (240, 240, 188): (153, 153, 0),
+}
 
 def build_section(params):
     section, experiment, experiment_dir, bboxes, seg_data = params
-    return produce_patch_collection(bboxes, seg_data, experiment_dir, experiment, section)
+    return produce_patch_collection(bboxes, seg_data, experiment_dir, experiment, section, color_mappings=COLOR_MAPPINGS)
 
 
 def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
@@ -32,7 +38,7 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
                        bboxes,
                        seg_data))
 
-    fig, ax = plt.subplots(nrows=NROWS, ncols=NCOLS, figsize=(NCOLS * 3 * FIG_SCALE, NROWS * 2 * FIG_SCALE), dpi=125)
+    fig, ax = plt.subplots(nrows=NROWS, ncols=NCOLS, figsize=(NCOLS * 3 * FIG_SCALE, NROWS * 2 * FIG_SCALE), dpi=DPI)
     for a in ax.flatten():
         a.axis('off')
 
@@ -44,12 +50,12 @@ def build_cell_grid(experiment, data_dir, seg_data_dir, output_path):
 
     brain_bbox = Rect(0, 0, max_w, max_h)
     for i, result in enumerate(tqdm(patches, "Plotting sections", total=len(patches))):
-        _, patches = result
+        _, patches, _ = result
         plot_patch_collection(ax.flatten()[i], brain_bbox, patches)
 
     print("Saving figure...")
 
-    fig.savefig(output_path, dpi=125)
+    fig.savefig(output_path, dpi=DPI)
     plt.close()
 
 

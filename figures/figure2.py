@@ -11,12 +11,12 @@ def plot_observed_vs_technical(data):
                                   'count': np.log10(data['count'])
                                   }).groupby('region')['count']
     regions = np.array(region_counts.mean().index)
-    x = region_counts.mean().to_numpy()
-    z = region_counts.std().to_numpy()
+    x = region_counts.mean().dropna().to_numpy()
+    z = region_counts.std().dropna().to_numpy()
 
     y = pd.DataFrame({'region': data.region,
                       'diff': np.log10((data.count_left + 1) / (data.count_right + 1)).pow(2)
-                      }).groupby('region')['diff'].sum().to_numpy()
+                      }).groupby('region')['diff'].sum().dropna().to_numpy()
     y = np.sqrt(y) / data.experiment_id.nunique()
     fig, ax = get_subplots()
 
@@ -54,8 +54,8 @@ def plot_observed_vs_technical(data):
 
 
 def plot_logcount_vs_logdiff(data, remove_outliers):
-    x = np.log10(data['count'].to_numpy())
-    y = np.log10((data.count_left + 1).to_numpy() / (data.count_right + 1).to_numpy())
+    x = np.log10(data['count'].dropna().to_numpy())
+    y = np.log10((data.count_left + 1).dropna().to_numpy() / (data.count_right + 1).dropna().to_numpy())
 
     if remove_outliers:
         lower_threshold = np.percentile(y, 1)
@@ -85,8 +85,8 @@ def plot_count_vs_diff(data):
 
 
 def plot_count_vs_brightness(data):
-    count = np.log10(data['count'].to_numpy())
-    brightness = data['brightness|mean'].to_numpy()
+    count = np.log10(data['count'].dropna().to_numpy())
+    brightness = data['brightness|mean'].dropna().to_numpy()
     fig, ax = get_subplots()
     density_scatter(ax, count, brightness)
     produce_figure(ax, fig, "count_vs_brightness", 'logcount', 'brightness')

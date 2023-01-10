@@ -17,7 +17,7 @@ fig_config = dict(
     dot_size=20,
     grid_linestyle='--',
     grid_color='r',
-    annotation_text_offset=(5, 5),
+    annotation_text_offset=(1, 1),
     annotation_text_size=4,
     save_fig=False,
     display=True,
@@ -126,6 +126,8 @@ def plot_grid(ax, vert_lines, horiz_lines, color=fig_config['grid_color'], lines
 
 def produce_figure(ax, fig, fpath, xlabel=None, ylabel=None, logscale=False, legend=False, format_xticks=True,
                    format_yticks=True, buf=None):
+    fpath = "".join(x for x in fpath if x.isalnum() or x=='-' or x == '_')
+
     if legend:
         ax.legend(fontsize=fig_config['tick_labelsize'])
 
@@ -179,7 +181,10 @@ def plot_annotations(ax, annotations, x_ann, y_ann, fontsize=fig_config['annotat
 
 
 def plot_scatter(ax, x, y, s=fig_config['dot_size'], label=None, color=None, **kwargs):
-    ax.scatter(x, y, s=s, label=label, color=color, marker='.', edgecolors='none', **kwargs)
+    if 'marker' in kwargs:
+        ax.scatter(x, y, s=s, label=label, color=color, edgecolors='none', **kwargs)
+    else:
+        ax.scatter(x, y, s=s, label=label, color=color, marker='.', edgecolors='none', **kwargs)
 
 
 def select_strain(data, strain):

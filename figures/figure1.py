@@ -11,10 +11,10 @@ from figures.util import get_subplots, plot_grid, produce_figure, plot_annotatio
 def param_ranked_list(data, param):
     regions = data.region.unique()
     regions = regions[find_leaves(regions)]
-    col_name = to_col_name(data, param)
+    col_name = to_col_name(data, param, "percentile90")
     means = data[data.region.isin(regions)].groupby('region')[col_name].mean()
-    param_data = means.to_numpy()
-    regions = means.index.to_numpy()
+    param_data = means.dropna().to_numpy()
+    regions = means.index.dropna().to_numpy()
     idx = np.argsort(param_data)[::-1]
 
     df = pd.DataFrame({
@@ -49,8 +49,8 @@ def param_pie_chart(data, param='count', level=None, descend_from='grey'):
     regions = data.region.unique()
     regions = regions_by_level(level, regions, descend_from)
     means = data[data.region.isin(regions)].groupby('region')[to_col_name(data, param)].median()
-    vals = means.to_numpy()
-    regions = means.index.to_numpy()
+    vals = means.dropna().to_numpy()
+    regions = means.index.dropna().to_numpy()
 
     idx, colors = sort_by_color(regions)
     vals = vals[idx]

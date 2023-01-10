@@ -47,7 +47,11 @@ class Rect(namedtuple("RectBase", ['x', 'y', 'w', 'h'])):
     __add__ = union
 
     def scale(self, factor):
-        return Rect(y=int(self.y * factor), x=int(self.x * factor), w=int(self.w * factor), h=int(self.h * factor))
+        return self.scale_xy((factor, factor))
+
+    def scale_xy(self, ratio):
+        factor_y, factor_x = ratio
+        return Rect(y=int(self.y * factor_y), x=int(self.x * factor_x), w=int(self.w * factor_x), h=int(self.h * factor_y))
 
     def move(self, offset):
         return Rect(y=int(self.y + offset), x=int(self.x + offset), w=self.w, h=self.h)
