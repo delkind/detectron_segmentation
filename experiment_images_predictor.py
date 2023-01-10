@@ -137,6 +137,7 @@ class ExperimentImagesPredictor(DirWatcher):
             h = h * ratios[1]
             cellmask_fname = f'{directory}/cellmask-{experiment_id}-{section}-{x}_{y}_{w}_{h}.png'
             if not os.path.isfile(cellmask_fname):
+                self.logger.info(f"Experiment {experiment_id}: processing file {directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg...")
                 image = cv2.imread(f'{directory}/full-{experiment_id}-{section}-{x}_{y}_{w}_{h}.jpg',
                                    cv2.IMREAD_GRAYSCALE)
                 img_mask = self.predict_cells(image, mask, x, y, ratios)
