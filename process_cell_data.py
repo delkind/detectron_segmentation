@@ -250,7 +250,7 @@ class ExperimentCellsProcessor(object):
         for section in relevant_sections:
             heatmaps[section] = np.zeros_like(self.seg_data[:, :, section], dtype=float)
             heatmaps[section][data_frame[data_frame.section == section].centroid_y.to_numpy().astype(int) // self.ratios[section][0],
-                              data_frame[data_frame.section == section].centroid_x.to_numpy().astype(int) // self.ratios[section][0]] = \
+                              data_frame[data_frame.section == section].centroid_x.to_numpy().astype(int) // self.ratios[section][1]] = \
                 data_frame[data_frame.section == section].coverage
         import matplotlib.pyplot as plt
         for section in range(dense_masks.shape[2]):
