@@ -75,7 +75,7 @@ def perform_watershed(mask, min_distance=3):
 def apply_watershed(image):
     cnts, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = np.array([c.squeeze() for c in cnts if c.shape[0] > 2], dtype=object)
-    if not cnts:
+    if len(cnts) < 1:
         return []
     polys = np.vectorize(lambda p: Polygon(p))(cnts)
     roundness = np.vectorize(lambda pp: (pp.area * 4 * math.pi) / (pp.length ** 2))(polys)
