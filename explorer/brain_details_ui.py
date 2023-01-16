@@ -254,7 +254,8 @@ class BrainDetailsSelector(widgets.VBox):
                                         f'{self.input_dir}/{experiment_id}/cell-grid.pdf')
 
     def refresh(self):
-        self.experiments_selector.set_available_brains(set([int(e) for e in os.listdir(self.input_dir) if e.isdigit()]))
+        self.experiments_selector.set_available_brains(set([int(e) for e in os.listdir(self.input_dir) if e.isdigit()]),
+                                                       dapi_brains)
         experiment_ids = list(set(self.experiments_selector.get_selection()))
         self.on_select_experiment(experiment_ids)
 

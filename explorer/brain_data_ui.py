@@ -18,7 +18,7 @@ from figures.util import get_subplots, produce_figure
 class DataSelector(widgets.VBox):
     def __init__(self, data_dir, results_selector):
         # self.experiment_selector = ExperimentsSelector([e for e in os.listdir(data_dir) if e.isdigit()])
-        self.experiment_selector = ExperimentsSelector(results_selector.get_available_brains())
+        self.experiment_selector = ExperimentsSelector(results_selector.get_available_brains(), results_selector.get_dapi_brains())
         self.results_selector = results_selector
         self.add_button = widgets.Button(description='Add')
         self.add_button.on_click(lambda b: self.add_data())
@@ -98,7 +98,7 @@ class DataSelector(widgets.VBox):
 
 class BrainAggregatesHistogramPlot(widgets.VBox):
     def __init__(self, data_dir, raw_data_selector):
-        # self.data_selector = DataSelector(data_dir, ResultsSelector(pickle.load(open(f'{data_dir}/../stats.pickle',
+        #self.data_selector = DataSelector(data_dir, ResultsSelector(pickle.load(open(f'{data_dir}/../stats.pickle',
         #                                                                              'rb'))))
         self.data_selector = DataSelector(data_dir, raw_data_selector)
         self.show_identity = widgets.Checkbox(value=True, description='Show x=y', indent=True)

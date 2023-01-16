@@ -3,6 +3,7 @@ import os
 import ipytree
 import ipywidgets as widgets
 import numpy as np
+import pandas as pd
 from IPython.display import display, Markdown
 from allensdk.core.mouse_connectivity_cache import MouseConnectivityCache
 import matplotlib.pyplot as plt
@@ -92,11 +93,11 @@ class StructureTree(widgets.VBox):
 
 
 class ExperimentsSelector(widgets.VBox):
-    def __init__(self, available_brains=None):
+    def __init__(self, available_brains=None, dapi_brains=None):
         self.mcc = MouseConnectivityCache(manifest_file=f'../mouse_connectivity/mouse_connectivity_manifest.json',
                                           resolution=25)
         self.messages = widgets.Output()
-        self.set_available_brains(available_brains)
+        self.set_available_brains(available_brains, dapi_brains)
         self.filter = {
             col: widgets.SelectMultiple(description=col, options=self.get_column_options(self.experiments[col]))
             for col in ['gender', 'strain', 'transgenic_line', 'id']}
@@ -115,12 +116,17 @@ class ExperimentsSelector(widgets.VBox):
     def get_column_options(df):
         return sorted(df.unique().tolist())
 
-    def set_available_brains(self, available_brains):
+    def set_available_brains(self, available_brains, dapi_brains=None):
         self.experiments = self.mcc.get_experiments(dataframe=True)
         self.experiments.at[self.experiments.strain.isin([None]), 'strain'] = '<none>'
         self.experiments.at[self.experiments.transgenic_line.isin([None]), 'transgenic_line'] = '<none>'
         if available_brains is not None:
-            self.experiments = self.experiments[self.experiments.id.isin([int(e) for e in available_brains])]
+            self.experiments = self.experiments[self.experiments.id.isin([int(e) for e in available_brains])].drop(columns=['id']).reset_index()
+            self.experiments['id'] = self.experiments['id'].astype(str)
+            if dapi_brains is not None:
+                self.experiments = self.experiments.append(pd.DataFrame([{c: 'DAPI' if c != 'id' else e
+                                                                               for c in set(self.experiments.columns)}
+                                                                              for e in dapi_brains]), sort=True)
         self.messages.clear_output()
         with self.messages:
             display(Markdown(f'Selected {len(self.get_selection())} brains'))
@@ -168,7 +174,7 @@ class ExperimentsSelector(widgets.VBox):
 
     def get_selection(self):
         selection = {col: sel.value for col, sel in self.filter.items()}
-        query_string = ' and '.join([f'{col} == {val}' for col, val in selection.items() if val])
+        query_string = ' and '.join([f'{col} in {val}' for col, val in selection.items() if val])
         if query_string:
             selection = self.experiments.query(query_string)
         else:
@@ -177,7 +183,7 @@ class ExperimentsSelector(widgets.VBox):
         return set(selection.id.unique().tolist())
 
     def get_selection_label(self):
-        label = '.'.join([f'({",".join([str(v) for v in val.value])})'
+        label = '.'.join([f'({",".join([str(v) for v in val.value])[:20]})'
                           for val in self.filter.values() if val.value])
         if label == '':
             label = '<all>'
@@ -189,8 +195,9 @@ class ExperimentsSelector(widgets.VBox):
 
 
 class ResultsSelector(widgets.HBox):
-    def __init__(self, data):
+    def __init__(self, data, dapi_data=None):
         self.data = data
+        self.dapi_data = dapi_data
         self.selector = widgets.Dropdown()
         self.selector.options = [d for d in data if d not in {'experiment_id', 'region'}]
         self.selector.value = self.selector.options[0]
@@ -213,6 +220,9 @@ class ResultsSelector(widgets.HBox):
     def get_available_brains(self):
         return list(self.data.experiment_id.unique())
 
+    def get_dapi_brains(self):
+        return list(self.dapi_data.experiment_id.unique()) if self.dapi_data is not None else []
+
     def on_change(self, change):
         if change['name'] == 'value' and self.selector.options and self.selector.value is not None:
             pass
@@ -223,8 +233,10 @@ class ResultsSelector(widgets.HBox):
         if path is None:
             return None
 
-        return np.array(self.data[self.data.experiment_id.isin(relevant_experiments) &
-                                  (self.data.region == path[0])][path[1]].dropna())
+        return np.append(np.array(self.data[self.data.experiment_id.isin(relevant_experiments) &
+                                  (self.data.region == path[0])][path[1]].dropna()),
+                         np.array(self.dapi_data[self.dapi_data.experiment_id.isin(relevant_experiments) &
+                                           (self.dapi_data.region == path[0])][path[1]].dropna()))
 
     def get_selection_label(self):
         path = self.get_selection_path()
