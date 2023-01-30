@@ -155,7 +155,7 @@ def calculate_global_parameters(cells, globs_per_section, seg, ratios):
 
         cells_region = cells[(cells.structure_id == region) & (cells.diameter > 2) & (cells.diameter < 12)]
 
-        if ratios[0] < 64:
+        if list(ratios.values())[0][0] < 64:
             diameter = {0.9: 10}
         else:
             diameter = {q: cells_region.diameter.quantile(q) for q in quantiles}
