@@ -155,7 +155,10 @@ def calculate_global_parameters(cells, globs_per_section, seg, ratios):
 
         cells_region = cells[(cells.structure_id == region) & (cells.diameter > 2) & (cells.diameter < 12)]
 
-        diameter = {q: cells_region.diameter.quantile(q) for q in quantiles}
+        if ratios[0] < 64:
+            diameter = {0.9: 10}
+        else:
+            diameter = {q: cells_region.diameter.quantile(q) for q in quantiles}
 
         for s1, s2 in section_pairs:
             volume = (region_data[s1]['region_area'] + region_data[s2]['region_area']) / 2 * 100 * max((s2 - s1), 1)
@@ -259,7 +262,7 @@ def process_experiment_section_data(experiment, experiment_data):
         for col in d.keys():
             for i, val in enumerate(map(lambda x: x.mean() if x.shape[0] > 0 else 0, np.array_split(d[col], 10))):
                 reg_dict[f'{col}_{i}'] = val
-        reg_dict['experiment_id'] = experiment
+        reg_dict['experiment_id'] = str(experiment)
         reg_dict['region'] = region
         data.append(reg_dict)
     return data
@@ -279,7 +282,7 @@ def build_region_row(exp_id, region, reg_data):
             params_dict = {**params_dict, **{f'{param}|{stat}': stat_val for stat, stat_val in param_data.items()}}
 
     params_dict = {
-        'experiment_id': int(exp_id),
+        'experiment_id': str(exp_id),
         'region': region,
         **params_dict
     }
