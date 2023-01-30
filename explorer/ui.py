@@ -129,6 +129,7 @@ class ExperimentsSelector(widgets.VBox):
                                                                               for e in dapi_brains]), sort=True)
         self.messages.clear_output()
         with self.messages:
+            display(self.experiments)
             display(Markdown(f'Selected {len(self.get_selection())} brains'))
 
     def get_filter_value(self, col):
@@ -305,9 +306,12 @@ class SectionDataResultsSelector(widgets.HBox):
 
 
 class RawDataResultsSelector(widgets.VBox):
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, dapi_data_dir):
+        self.dapi_data_dir = dapi_data_dir
         self.data_frames = DataFramesHolder(data_dir)
+        self.dapi_data_frames = DataFramesHolder(dapi_data_dir)
         self.available_brains = [e for e in os.listdir(data_dir) if e.isdigit()]
+        self.available_dapi_brains = [e for e in os.listdir(dapi_data_dir) if e.isdigit()]
         self.data_template = self.data_frames[self.available_brains[0]]
         self.messages = widgets.Output()
         self.mcc = MouseConnectivityCache(manifest_file=f'mouse_connectivity/mouse_connectivity_manifest.json',
@@ -321,13 +325,16 @@ class RawDataResultsSelector(widgets.VBox):
         self.tree.layout.max_height = "240px"
         self.tree.layout.overflow_y = 'scroll'
 
-        self.parameter_selector = widgets.Dropdown(description="Parameter", options=['coverage', 'area', 'perimeter'])
+        self.parameter_selector = widgets.Dropdown(description="Parameter", options=['coverage', 'area', 'perimeter', 'diameter'])
 
         self.change_handler = None
         super().__init__((widgets.HBox([self.tree, self.parameter_selector]), self.messages))
 
     def get_available_brains(self):
         return self.available_brains
+
+    def get_dapi_brains(self):
+        return self.available_dapi_brains
 
     def reset(self):
         for v in self.filter.values():
@@ -350,7 +357,7 @@ class RawDataResultsSelector(widgets.VBox):
 
     def get_selection(self, relevant_experiments):
         structs = [self.structure_tree.get_id_acronym_map()[s] for s in self.get_selected_structs()]
-        return np.concatenate([self.process_data_frame(self.data_frames[e], structs) for e in relevant_experiments])
+        return np.concatenate([self.process_data_frame(self.data_frames[e] if e in self.data_frames else self.dapi_data_frames[e], structs) for e in relevant_experiments])
 
     def get_selection_label(self):
         path = self.get_selection_path()

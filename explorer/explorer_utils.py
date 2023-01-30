@@ -183,6 +183,8 @@ class DataFramesHolder(object):
         else:
             return self.load_data(item)
 
+    def __contains__(self, item):
+        return item in os.listdir(self.data_dir)
 
 def is_file_up_to_date(path, base_time):
     return os.path.isfile(path) and os.path.getmtime(path) > base_time

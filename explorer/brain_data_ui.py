@@ -6,6 +6,7 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy.stats
 import scipy.stats as stats
 import seaborn as sns
 from IPython.display import display, Markdown, HTML
@@ -204,7 +205,7 @@ class BrainAggregatesHistogramPlot(widgets.VBox):
         self.messages.clear_output()
         for k in values.keys():
             with self.messages:
-                display(Markdown(f'Median for ({k}): {np.median(values[k])}'))
+                display(Markdown(f'Median for ({k}): {np.median(values[k])}, STD: {np.std(values[k])}, SEM: {scipy.stats.sem(values[k])}'))
 
     def test(self, test):
         self.messages.clear_output()
