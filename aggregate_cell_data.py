@@ -167,7 +167,7 @@ def calculate_global_parameters(cells, globs_per_section, seg, ratios):
             volume_right = (region_data[s1]['region_area_right'] + region_data[s2][
                 'region_area_right']) / 2 * 100 * max(abs(s2 - s1), 1)
 
-            for q in quantiles:
+            for q in diameter.keys():
                 density1_left, density1_right, density1 = get_densities(cells_region, centers,
                                                                         diameter[q], region_data, s1, ratios)
                 density2_left, density2_right, density2 = get_densities(cells_region, centers,
